@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LoL Live Helper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>LoL <span>Live Helper</span></h1>
+    <div class="pills">
+      <div id="key-pill" class="pill idle">Key…</div>
+      <div id="status-pill" class="pill idle">Checking…</div>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup" class="card hidden">
+      <h2>Setup</h2>
+      <p class="muted">Enter your Riot ID, then sync your ranked history to build matchup stats.</p>
+      <div class="row">
+        <input id="game-name" placeholder="Game name (e.g. Faker)" />
+        <input id="tag-line" placeholder="Tagline (e.g. KR1)" />
+        <button id="save-config">Save</button>
+      </div>
+      <div class="row">
+        <button id="sync-btn">Sync match history</button>
+        <span id="sync-status" class="muted"></span>
+      </div>
+      <p id="setup-error" class="error"></p>
+      <hr class="divider" />
+      <p class="muted">Riot API key — dev keys expire every 24h. Grab a fresh one at
+        <a href="https://developer.riotgames.com" target="_blank">developer.riotgames.com</a> and paste it here
+        (no restart needed).</p>
+      <div class="row">
+        <input id="api-key" class="wide" type="password" placeholder="RGAPI-..." autocomplete="off" />
+        <button id="save-key">Save key</button>
+        <span id="key-status" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="live" class="hidden">
+      <div id="live-banner" class="banner hidden"></div>
+      <div id="scoreboard" class="card"></div>
+      <div id="teams">
+        <details id="ally-panel" open>
+          <summary>Your team</summary>
+          <div id="allies"></div>
+        </details>
+        <details id="enemy-panel" open>
+          <summary>Enemy team</summary>
+          <div id="enemies"></div>
+        </details>
+      </div>
+    </section>
+
+    <section id="idle" class="hidden">
+      <div class="card">
+        <h2>Not in a game</h2>
+        <p class="muted">Start a match and this page will update automatically. Meanwhile, here are your synced stats:</p>
+        <div id="summary"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
