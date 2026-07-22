@@ -39,7 +39,8 @@ async def live():
     if game is None:
         conn = store.connect()
         try:
-            last = store.get_meta(conn, "last_game")
+            puuid = store.get_meta(conn, "puuid")
+            last = store.get_meta(conn, f"last_game:{puuid}") if puuid else None
             return {"in_game": False, "last_game": json.loads(last) if last else None}
         finally:
             conn.close()
@@ -110,7 +111,8 @@ async def live():
             "result": result,
         }
         # Snapshot every poll so the dashboard can replay the last game once you leave
-        store.set_meta(conn, "last_game", json.dumps({"saved_at": time.time(), "data": payload}))
+        if puuid:
+            store.set_meta(conn, f"last_game:{puuid}", json.dumps({"saved_at": time.time(), "data": payload}))
         return payload
     finally:
         conn.close()

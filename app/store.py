@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "helper.db"
+LEGACY_UNSCOPED_PUUID = "__legacy_unscoped__"
 
 MATCHUPS_SCHEMA = """
 CREATE TABLE matchups (
@@ -51,7 +52,6 @@ def _migrate_matchups(conn: sqlite3.Connection) -> None:
             conn.commit()
             return
 
-        legacy_puuid = get_meta(conn, "puuid") or ""
         conn.execute("ALTER TABLE matchups RENAME TO matchups_legacy")
         conn.execute(MATCHUPS_SCHEMA)
         conn.execute(
@@ -59,7 +59,10 @@ def _migrate_matchups(conn: sqlite3.Connection) -> None:
             "(puuid, match_id, my_champ, enemy_champ, position, is_lane_opponent, win) "
             "SELECT ?, match_id, my_champ, enemy_champ, position, is_lane_opponent, win "
             "FROM matchups_legacy",
-            (legacy_puuid,),
+            # The old schema cannot prove which account owned a row after an
+            # account switch. Preserve the data, but exclude it from personal
+            # stats and let the next sync fetch authoritative account history.
+            (LEGACY_UNSCOPED_PUUID,),
         )
         conn.execute("DROP TABLE matchups_legacy")
         conn.commit()

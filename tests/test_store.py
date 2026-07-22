@@ -63,7 +63,7 @@ class StoreAccountScopingTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_legacy_rows_are_migrated_to_the_configured_account(self) -> None:
+    def test_legacy_rows_are_archived_until_account_history_is_resynced(self) -> None:
         conn = sqlite3.connect(store.DB_PATH)
         conn.executescript(
             """
@@ -87,16 +87,20 @@ class StoreAccountScopingTests(unittest.TestCase):
         try:
             columns = {row["name"] for row in migrated.execute("PRAGMA table_info(matchups)")}
             self.assertIn("puuid", columns)
-            self.assertEqual(store.known_match_ids(migrated, "account-a"), {"MATCH-1"})
+            self.assertEqual(store.known_match_ids(migrated, "account-a"), set())
             self.assertEqual(store.known_match_ids(migrated, "account-b"), set())
+            self.assertEqual(
+                store.known_match_ids(migrated, store.LEGACY_UNSCOPED_PUUID),
+                {"MATCH-1"},
+            )
 
             store.record_match(
                 migrated,
-                match_payload("MATCH-1", "account-b", "Ahri", "Zed", False),
-                "account-b",
+                match_payload("MATCH-1", "account-a", "Ahri", "Zed", True),
+                "account-a",
             )
             self.assertEqual(store.summary(migrated, "account-a")["matches_synced"], 1)
-            self.assertEqual(store.summary(migrated, "account-b")["matches_synced"], 1)
+            self.assertEqual(store.summary(migrated, "account-b")["matches_synced"], 0)
         finally:
             migrated.close()
 
