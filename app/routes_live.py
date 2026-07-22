@@ -57,7 +57,8 @@ async def live():
 
     conn = store.connect()
     try:
-        my_overall = store.champ_overall(conn, my_champ)
+        puuid = store.get_meta(conn, "puuid") or ""
+        my_overall = store.champ_overall(conn, puuid, my_champ)
         enemies, allies = [], []
         team_kills = {"ally": 0, "enemy": 0}
         for p in players:
@@ -76,7 +77,7 @@ async def live():
                 allies.append(entry)
             else:
                 team_kills["enemy"] += entry["scores"]["kills"]
-                m = store.matchup_stats(conn, my_champ, champ)
+                m = store.matchup_stats(conn, puuid, my_champ, champ)
                 entry["is_lane_opponent"] = bool(my_pos) and entry["position"] == my_pos
                 entry["stats"] = m
                 entry["verdict"] = analysis.verdict(m, my_overall)

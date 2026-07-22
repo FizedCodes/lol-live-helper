@@ -25,7 +25,7 @@ async def sync_matches():
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        known = store.known_match_ids(conn)
+        known = store.known_match_ids(conn, puuid)
         todo = [m for m in match_ids if m not in known]
         stored = 0
         try:
@@ -50,6 +50,7 @@ async def sync_matches():
 async def stats():
     conn = store.connect()
     try:
-        return store.summary(conn)
+        puuid = store.get_meta(conn, "puuid") or ""
+        return store.summary(conn, puuid)
     finally:
         conn.close()

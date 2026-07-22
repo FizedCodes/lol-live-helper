@@ -6,21 +6,66 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "helper.db"
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS matchups (
+MATCHUPS_SCHEMA = """
+CREATE TABLE matchups (
+    puuid TEXT NOT NULL,
     match_id TEXT NOT NULL,
     my_champ TEXT NOT NULL,
     enemy_champ TEXT NOT NULL,
     position TEXT NOT NULL,
     is_lane_opponent INTEGER NOT NULL,
     win INTEGER NOT NULL,
-    PRIMARY KEY (match_id, enemy_champ)
+    PRIMARY KEY (puuid, match_id, enemy_champ)
 );
 """
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS matchups (
+    puuid TEXT NOT NULL,
+    match_id TEXT NOT NULL,
+    my_champ TEXT NOT NULL,
+    enemy_champ TEXT NOT NULL,
+    position TEXT NOT NULL,
+    is_lane_opponent INTEGER NOT NULL,
+    win INTEGER NOT NULL,
+    PRIMARY KEY (puuid, match_id, enemy_champ)
+);
+"""
+
+
+def _migrate_matchups(conn: sqlite3.Connection) -> None:
+    """Add account ownership to databases created before matchups were PUUID-scoped."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(matchups)")}
+    if "puuid" in columns:
+        return
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Another connection may have completed the migration while this one waited.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(matchups)")}
+        if "puuid" in columns:
+            conn.commit()
+            return
+
+        legacy_puuid = get_meta(conn, "puuid") or ""
+        conn.execute("ALTER TABLE matchups RENAME TO matchups_legacy")
+        conn.execute(MATCHUPS_SCHEMA)
+        conn.execute(
+            "INSERT INTO matchups "
+            "(puuid, match_id, my_champ, enemy_champ, position, is_lane_opponent, win) "
+            "SELECT ?, match_id, my_champ, enemy_champ, position, is_lane_opponent, win "
+            "FROM matchups_legacy",
+            (legacy_puuid,),
+        )
+        conn.execute("DROP TABLE matchups_legacy")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def connect() -> sqlite3.Connection:
@@ -28,6 +73,7 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate_matchups(conn)
     return conn
 
 
@@ -44,8 +90,11 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.commit()
 
 
-def known_match_ids(conn: sqlite3.Connection) -> set[str]:
-    return {r["match_id"] for r in conn.execute("SELECT DISTINCT match_id FROM matchups")}
+def known_match_ids(conn: sqlite3.Connection, puuid: str) -> set[str]:
+    return {
+        r["match_id"]
+        for r in conn.execute("SELECT DISTINCT match_id FROM matchups WHERE puuid = ?", (puuid,))
+    }
 
 
 # Summoner's Rift 5v5 queues: normal draft, ranked solo, normal blind, ranked flex, quickplay
@@ -72,11 +121,12 @@ def record_match(conn: sqlite3.Connection, match: dict, puuid: str) -> bool:
         if p.get("teamId") == me.get("teamId"):
             continue
         is_laner = 1 if (p.get("teamPosition") or "") == my_pos and my_pos != "UNKNOWN" else 0
-        rows.append((match_id, my_champ, p["championName"], my_pos, is_laner, win))
+        rows.append((puuid, match_id, my_champ, p["championName"], my_pos, is_laner, win))
 
     conn.executemany(
-        "INSERT OR IGNORE INTO matchups (match_id, my_champ, enemy_champ, position, is_lane_opponent, win) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO matchups "
+        "(puuid, match_id, my_champ, enemy_champ, position, is_lane_opponent, win) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
     conn.commit()
@@ -90,29 +140,37 @@ def _agg(row: sqlite3.Row | None) -> dict | None:
     return {"games": games, "wins": wins, "win_rate": round(100.0 * wins / games, 1)}
 
 
-def matchup_stats(conn: sqlite3.Connection, my_champ: str, enemy_champ: str) -> dict:
+def matchup_stats(conn: sqlite3.Connection, puuid: str, my_champ: str, enemy_champ: str) -> dict:
     """Personal stats for facing enemy_champ: overall, as lane opponent, and on my_champ specifically."""
-    q = "SELECT COUNT(DISTINCT match_id) AS games, SUM(win) AS wins FROM matchups WHERE enemy_champ = ?"
-    vs_any = _agg(conn.execute(q, (enemy_champ,)).fetchone())
-    vs_lane = _agg(conn.execute(q + " AND is_lane_opponent = 1", (enemy_champ,)).fetchone())
-    on_champ = _agg(conn.execute(q + " AND my_champ = ?", (enemy_champ, my_champ)).fetchone())
+    q = (
+        "SELECT COUNT(DISTINCT match_id) AS games, SUM(win) AS wins "
+        "FROM matchups WHERE puuid = ? AND enemy_champ = ?"
+    )
+    params = (puuid, enemy_champ)
+    vs_any = _agg(conn.execute(q, params).fetchone())
+    vs_lane = _agg(conn.execute(q + " AND is_lane_opponent = 1", params).fetchone())
+    on_champ = _agg(conn.execute(q + " AND my_champ = ?", (*params, my_champ)).fetchone())
     return {"vs_any": vs_any, "vs_as_laner": vs_lane, "on_my_champ": on_champ}
 
 
-def champ_overall(conn: sqlite3.Connection, my_champ: str) -> dict | None:
+def champ_overall(conn: sqlite3.Connection, puuid: str, my_champ: str) -> dict | None:
     row = conn.execute(
         "SELECT COUNT(DISTINCT match_id) AS games, SUM(win) AS wins FROM "
-        "(SELECT DISTINCT match_id, win FROM matchups WHERE my_champ = ?)",
-        (my_champ,),
+        "(SELECT DISTINCT match_id, win FROM matchups WHERE puuid = ? AND my_champ = ?)",
+        (puuid, my_champ),
     ).fetchone()
     return _agg(row)
 
 
-def summary(conn: sqlite3.Connection) -> dict:
-    total = conn.execute("SELECT COUNT(DISTINCT match_id) AS n FROM matchups").fetchone()["n"]
+def summary(conn: sqlite3.Connection, puuid: str) -> dict:
+    total = conn.execute(
+        "SELECT COUNT(DISTINCT match_id) AS n FROM matchups WHERE puuid = ?", (puuid,)
+    ).fetchone()["n"]
     champs = conn.execute(
         "SELECT my_champ, COUNT(DISTINCT match_id) AS games, SUM(win) AS wins FROM "
-        "(SELECT DISTINCT match_id, my_champ, win FROM matchups) GROUP BY my_champ ORDER BY games DESC"
+        "(SELECT DISTINCT match_id, my_champ, win FROM matchups WHERE puuid = ?) "
+        "GROUP BY my_champ ORDER BY games DESC",
+        (puuid,),
     ).fetchall()
     return {
         "matches_synced": total,
