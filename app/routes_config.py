@@ -22,13 +22,16 @@ class KeyIn(BaseModel):
 async def get_config():
     conn = store.connect()
     try:
+        # Localhost-only app: return the key so the Setup field can show it in plain text
+        key = config.current_api_key()
         return {
             "game_name": store.get_meta(conn, "game_name"),
             "tag_line": store.get_meta(conn, "tag_line"),
             "region": config.region(),
             "platform": config.platform(),
-            "has_api_key": config.current_api_key() is not None,
+            "has_api_key": key is not None,
             "key_source": config.key_source(),
+            "api_key": key or "",
         }
     finally:
         conn.close()

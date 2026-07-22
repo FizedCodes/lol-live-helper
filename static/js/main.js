@@ -34,9 +34,10 @@ $("save-key").addEventListener("click", async () => {
   $("key-status").textContent = "Validating with Riot…";
   $("save-key").disabled = true;
   try {
-    await post("/api/key", { key: $("api-key").value });
+    const key = $("api-key").value.trim();
+    await post("/api/key", { key });
+    $("api-key").value = key; // keep visible so you can confirm what was saved
     $("key-status").textContent = "✓ Key accepted and saved.";
-    $("api-key").value = "";
     refreshKeyPill();
   } catch (e) {
     $("key-status").textContent = e.message;
@@ -51,6 +52,7 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   if (cfg.game_name) $("game-name").value = cfg.game_name;
   if (cfg.tag_line) $("tag-line").value = cfg.tag_line;
+  if (cfg.api_key) $("api-key").value = cfg.api_key;
   $("setup").classList.remove("hidden");
 }
 
