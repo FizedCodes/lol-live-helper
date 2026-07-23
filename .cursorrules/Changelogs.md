@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-22 (night) — win rate tracker + builds revamp
+- **Win rate tracker**: new `matches` table stores queue + play time per game. `/api/stats`
+  now returns overall / ranked / normals WR, per-champion table, and recently played champs.
+  Live scoreboard shows compact Ranked + current-champ WR chips with a link to Stats.
+  Next Sync upgrades older rows that lacked queue info (rate-limit aware).
+- **Builds revamp**: META core for your champ's archetype (ADC, mage, assassin, tank, …)
+  plus situational alternatives from enemy picks *and* what they've already bought
+  (armor/MR stacks, healing, assassins).
+
 ## 2026-07-22 (evening) — tabs, item tooltips, counter builds
 - **Tabs**: header nav (Live / Builds / Stats / Setup) using URL hashes (`#live`, `#builds`, …)
   so each view is linkable. Stats summary and Setup card moved out of the main page into

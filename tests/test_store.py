@@ -6,12 +6,21 @@ from pathlib import Path
 from app import store
 
 
-def match_payload(match_id: str, puuid: str, my_champ: str, enemy_champ: str, win: bool) -> dict:
+def match_payload(
+    match_id: str,
+    puuid: str,
+    my_champ: str,
+    enemy_champ: str,
+    win: bool,
+    queue_id: int = 420,
+    game_creation_ms: int = 1_700_000_000_000,
+) -> dict:
     return {
         "metadata": {"matchId": match_id},
         "info": {
             "gameDuration": 1800,
-            "queueId": 420,
+            "queueId": queue_id,
+            "gameCreation": game_creation_ms,
             "participants": [
                 {
                     "puuid": puuid,
@@ -58,8 +67,32 @@ class StoreAccountScopingTests(unittest.TestCase):
                 store.matchup_stats(conn, "account-b", "Ahri", "Zed")["vs_any"]["win_rate"],
                 0.0,
             )
-            self.assertEqual(store.summary(conn, "account-a")["matches_synced"], 1)
+            summary_a = store.summary(conn, "account-a")
+            self.assertEqual(summary_a["matches_synced"], 1)
+            self.assertEqual(summary_a["ranked"]["win_rate"], 100.0)
+            self.assertEqual(summary_a["recent_champions"][0]["champion"], "Ahri")
             self.assertEqual(store.summary(conn, "unseen-account")["matches_synced"], 0)
+        finally:
+            conn.close()
+
+    def test_ranked_and_normal_win_rates_split_by_queue(self) -> None:
+        conn = store.connect()
+        try:
+            store.record_match(
+                conn, match_payload("R1", "a", "Jinx", "Caitlyn", True, queue_id=420), "a"
+            )
+            store.record_match(
+                conn, match_payload("R2", "a", "Jinx", "Ashe", False, queue_id=440), "a"
+            )
+            store.record_match(
+                conn, match_payload("N1", "a", "Lux", "Annie", True, queue_id=400), "a"
+            )
+            s = store.summary(conn, "a")
+            self.assertEqual(s["overall"]["games"], 3)
+            self.assertEqual(s["ranked"]["games"], 2)
+            self.assertEqual(s["ranked"]["win_rate"], 50.0)
+            self.assertEqual(s["normals"]["games"], 1)
+            self.assertTrue(s["ranked_ready"])
         finally:
             conn.close()
 
@@ -89,10 +122,14 @@ class StoreAccountScopingTests(unittest.TestCase):
             self.assertIn("puuid", columns)
             self.assertEqual(store.known_match_ids(migrated, "account-a"), set())
             self.assertEqual(store.known_match_ids(migrated, "account-b"), set())
-            self.assertEqual(
-                store.known_match_ids(migrated, store.LEGACY_UNSCOPED_PUUID),
-                {"MATCH-1"},
-            )
+            # Legacy matchups stay archived under the sentinel puuid, but are not
+            # "known" for sync (no real queue_id) so they never block a re-pull.
+            legacy_rows = migrated.execute(
+                "SELECT COUNT(*) AS n FROM matchups WHERE puuid = ?",
+                (store.LEGACY_UNSCOPED_PUUID,),
+            ).fetchone()["n"]
+            self.assertEqual(legacy_rows, 1)
+            self.assertEqual(store.known_match_ids(migrated, store.LEGACY_UNSCOPED_PUUID), set())
 
             store.record_match(
                 migrated,

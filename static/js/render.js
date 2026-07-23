@@ -23,6 +23,12 @@ export function wrSpan(agg) {
   return `<span class="wr ${cls}">${agg.win_rate}%</span> <span class="muted">(${agg.games}g)</span>`;
 }
 
+function wrPct(agg) {
+  if (!agg) return '<span class="muted">—</span>';
+  const cls = agg.win_rate >= 55 ? "good" : agg.win_rate <= 45 ? "bad" : "";
+  return `<span class="wr ${cls}">${agg.win_rate}%</span>`;
+}
+
 export function gameClock(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60).toString().padStart(2, "0");
@@ -30,6 +36,7 @@ export function gameClock(seconds) {
 }
 
 export function timeAgo(epochSeconds) {
+  if (!epochSeconds) return "";
   const mins = Math.round((Date.now() / 1000 - epochSeconds) / 60);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} min ago`;
@@ -96,7 +103,17 @@ export function renderLive(data, els) {
          <img src="${champIcon(me.champion)}" alt="" onerror="this.style.visibility='hidden'" />
          <div>
            <div class="name">${me.champion}${me.position ? ` <span class="tag">${me.position}</span>` : ""}</div>
-           <div class="sub">${kdaSpan(me.scores)} · overall: ${wrSpan(me.overall)}</div>
+           <div class="sub">${kdaSpan(me.scores)}</div>
+           <div class="wr-strip">
+             <span class="wr-chip" title="Your ranked solo + flex win rate">
+               Ranked ${wrPct(me.ranked)}
+             </span>
+             <span class="wr-chip" title="Your win rate on this champion">
+               ${me.champion} ${wrPct(me.overall)}
+               <span class="muted">${me.overall ? `(${me.overall.games}g)` : ""}</span>
+             </span>
+             <a class="wr-more" href="#stats">Full stats →</a>
+           </div>
          </div>
        </div>
      </div>`;
@@ -105,14 +122,55 @@ export function renderLive(data, els) {
   els.allies.innerHTML = data.allies.map((a) => playerRow(a, me.champion)).join("");
 }
 
+function wrCard(label, agg, note) {
+  return `<div class="wr-card">
+    <div class="wr-card-label">${label}</div>
+    <div class="wr-card-value">${wrPct(agg)}</div>
+    <div class="muted">${agg ? `${agg.wins}W · ${agg.games}g` : (note || "No data yet")}</div>
+  </div>`;
+}
+
 export function renderSummary(s, container) {
   if (!s.matches_synced) {
-    container.innerHTML = '<p class="muted">No matches synced yet.</p>';
+    container.innerHTML = '<p class="muted">No matches synced yet. Hit Sync in Setup to pull your history.</p>';
     return;
   }
-  const rows = s.champions.slice(0, 15).map((c) =>
-    `<tr><td>${c.champion}</td><td>${c.games}</td><td>${c.win_rate}%</td></tr>`).join("");
+
+  const rankedNote = s.ranked_ready
+    ? ""
+    : "Re-sync match history to split ranked vs normals.";
+
+  const recent = (s.recent_champions || []).map((c) =>
+    `<div class="recent-champ">
+       <img src="${champIcon(c.champion)}" alt="" onerror="this.style.visibility='hidden'" />
+       <div>
+         <div class="name">${c.champion}</div>
+         <div class="sub">${wrSpan(c)}${c.last_played ? ` · ${timeAgo(c.last_played)}` : ""}</div>
+       </div>
+     </div>`).join("");
+
+  const rows = (s.champions || []).slice(0, 20).map((c) =>
+    `<tr>
+       <td class="champ-cell"><img src="${champIcon(c.champion)}" alt="" /> ${c.champion}</td>
+       <td>${c.games}</td>
+       <td>${c.wins ?? "—"}</td>
+       <td>${wrPct(c)}</td>
+     </tr>`).join("");
+
   container.innerHTML =
-    `<p class="muted">${s.matches_synced} matches synced.</p>
-     <table><tr><th>Your champion</th><th>Games</th><th>Win rate</th></tr>${rows}</table>`;
+    `<div class="wr-cards">
+       ${wrCard("Overall", s.overall)}
+       ${wrCard("Ranked", s.ranked, rankedNote)}
+       ${wrCard("Normals / Quickplay", s.normals)}
+     </div>
+     ${!s.ranked_ready ? `<p class="muted hint">${rankedNote}</p>` : ""}
+     <h3>Recently played</h3>
+     <p class="muted">Champions from your latest synced games, with your average win rate on each.</p>
+     <div class="recent-list">${recent || '<p class="muted">No recent champions yet.</p>'}</div>
+     <h3>All champions</h3>
+     <p class="muted">${s.matches_synced} matches synced.</p>
+     <table>
+       <tr><th>Champion</th><th>Games</th><th>Wins</th><th>Win rate</th></tr>
+       ${rows}
+     </table>`;
 }

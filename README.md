@@ -56,5 +56,6 @@ static/                 Frontend (plain HTML/CSS/JS, no build step)
 
 - All Summoner's Rift 5v5 queues are synced (ranked solo/flex, normal draft/blind, quickplay). ARAM, arena, and bot games are skipped. Edit `SR_QUEUES` in `app/store.py` to change this.
 - The "Play safe / Push hard" verdict needs at least 3 games of history against a champion; otherwise it falls back to your overall win rate on your current pick.
+- The Stats tab tracks overall / ranked / normal win rates plus recently played champs. If ranked shows empty after this update, hit **Sync** once to attach queue info to older games.
 - Data lives in `data/helper.db` (SQLite). Delete it to start fresh.
 - Riot's terms: this app only reads data (live client + your match history), which is allowed. Don't use it to automate gameplay.

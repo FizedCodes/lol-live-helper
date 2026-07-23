@@ -314,3 +314,105 @@ th { color: var(--muted); font-weight: 600; }
   margin-left: 8px;
   vertical-align: middle;
 }
+
+/* Live page compact WR chips */
+.wr-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.wr-chip {
+  font-size: 12px;
+  font-weight: 600;
+  background: #0d1322;
+  border: 1px solid var(--card-edge);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.wr-more {
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+/* Stats tab */
+.wr-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+@media (max-width: 700px) {
+  .wr-cards { grid-template-columns: 1fr; }
+}
+.wr-card {
+  background: #0d1322;
+  border: 1px solid var(--card-edge);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.wr-card-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.wr-card-value {
+  font-size: 28px;
+  font-weight: 800;
+  margin: 4px 0;
+}
+.hint { margin-bottom: 12px; }
+#tab-stats h3 {
+  margin: 22px 0 6px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.recent-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+.recent-champ {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0d1322;
+  border: 1px solid var(--card-edge);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.recent-champ img {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--card-edge);
+}
+.recent-champ .name { font-weight: 700; font-size: 13px; }
+.champ-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.champ-cell img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--card-edge);
+}
+
+/* Builds tab headings */
+#tab-builds h3 {
+  margin: 22px 0 6px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.meta-core .build-head { gap: 10px; }

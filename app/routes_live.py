@@ -60,6 +60,7 @@ async def live():
     try:
         puuid = store.get_meta(conn, "puuid") or ""
         my_overall = store.champ_overall(conn, puuid, my_champ)
+        ranked_wr = store.queue_win_rate(conn, puuid, store.RANKED_QUEUES)
         enemies, allies = [], []
         team_kills = {"ally": 0, "enemy": 0}
         for p in players:
@@ -104,7 +105,13 @@ async def live():
         payload = {
             "in_game": True,
             "game_time": (game.get("gameData") or {}).get("gameTime", 0),
-            "me": {"champion": my_champ, "position": my_pos, "overall": my_overall, "scores": _scores_of(me)},
+            "me": {
+                "champion": my_champ,
+                "position": my_pos,
+                "overall": my_overall,       # WR on this champion (all queues)
+                "ranked": ranked_wr,         # personal ranked solo+flex WR
+                "scores": _scores_of(me),
+            },
             "team_kills": team_kills,
             "enemies": enemies,
             "allies": allies,

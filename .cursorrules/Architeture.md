@@ -13,8 +13,9 @@ FastAPI (app/main.py — wiring only, ~40 lines)
         ├── riot.py      HTTP clients: fetch_live_game() → https://127.0.0.1:2999 (self-signed cert,
         │                verify=False, returns None when not in game); RiotWebApi → Account-V1,
         │                Match-V5 (regional host), League-V4 (platform host); validate_key()
-        ├── store.py     SQLite (data/helper.db): meta key/value table + matchups table;
-        │                matchup_stats(), champ_overall(), summary(), record_match()
+        ├── store.py     SQLite (data/helper.db): meta + matchups + matches (queue/time);
+        │                matchup_stats(), champ_overall(), queue_win_rate(), summary(),
+        │                record_match()
         ├── analysis.py  verdict(): thresholds MIN_GAMES_FOR_VERDICT=3, favored ≥55% WR, unfavored ≤45%
         ├── ranks.py     fetch_ranks(): Riot ID → puuid → league entries; module-level cache
         │                (ranks don't change mid-game); failures return None, never break /api/live
@@ -32,9 +33,9 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   once per load (`ready` promise; pinned-version fallback). Exports icon URL helpers,
   `getItem()`/`getChampion()`, and `initItemTooltips()` (one shared hover tooltip; any element
   with `data-item-id` gets it — name, gold, stripped description).
-- `js/builds.js` — `renderBuilds()`: rules-based counter items from enemy comp. Uses
-  champion.json `info` (attack/magic/defense) + `tags`, a curated healer set, and curated
-  item ID pools (filtered against item.json so stale IDs vanish on patch).
+- `js/builds.js` — `renderBuilds()`: META core by champion archetype + situational
+  alternatives from enemy picks and purchased item tags (armor/MR/heal). Curated item
+  IDs filtered against item.json so stale IDs vanish on patch.
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
 - `style.css` — dark LoL-ish theme, CSS vars at top; rank tier colors; `#teams` grid for
   side-by-side; `.tabs` nav, `#item-tooltip`, `.build-*` sections.
@@ -47,6 +48,8 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   with a "LAST GAME" banner; win/loss comes from the live client's `GameEnd` event when caught.
 - **Matchup rows**: one row per (match, enemy champ); `is_lane_opponent` flag; remakes (<300s)
   and non-Summoner's-Rift queues skipped (`SR_QUEUES` in store.py: 400, 420, 430, 440, 490).
+- **Matches rows**: one row per game with `queue_id` + `played_at` for ranked/normal WR and
+  recently-played champions. Backfilled legacy rows use `queue_id=0` until the next sync.
 - **API key resolution order**: DB meta `api_key` (saved from site) → `RIOT_API_KEY` in `.env`.
 
 ## Conventions
