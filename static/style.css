@@ -44,6 +44,26 @@ h1 span { color: var(--gold); }
 
 .pills { display: flex; gap: 8px; }
 
+/* Tab bar */
+.tabs { display: flex; gap: 4px; }
+.tabs a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.tabs a:hover { color: var(--text); }
+.tabs a.active {
+  color: var(--gold);
+  border-color: var(--card-edge);
+  background: var(--card);
+}
+
 .divider { border: none; border-top: 1px solid var(--card-edge); margin: 18px 0 4px; }
 
 input.wide { flex: 1; min-width: 220px; }
@@ -51,7 +71,11 @@ input.wide { flex: 1; min-width: 220px; }
 a { color: var(--gold); }
 
 main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
-#setup, #idle .card { max-width: 860px; margin-left: auto; margin-right: auto; }
+#setup, #idle, #tab-stats .card, #tab-builds .card {
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 .card {
   background: var(--card);
@@ -176,13 +200,65 @@ details summary::-webkit-details-marker { display: none; }
 .player-row .name { font-weight: 700; font-size: 14px; }
 .player-row .sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
 
-.items { display: flex; gap: 3px; margin-top: 4px; }
+.items { display: flex; gap: 3px; margin-top: 4px; align-items: center; flex-wrap: wrap; }
 .items img {
   width: 22px;
   height: 22px;
   border-radius: 4px;
   border: 1px solid var(--card-edge);
 }
+.items img.trinket { border-color: var(--gold); margin-left: 6px; }
+.item-gold {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Item hover tooltip (shared element, positioned by items.js) */
+#item-tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: 320px;
+  background: #0d1322;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 12px 14px;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+#item-tooltip .tip-name { color: var(--gold); font-weight: 700; font-size: 14px; }
+#item-tooltip .tip-gold { color: var(--muted); font-size: 12px; margin: 2px 0 8px; }
+#item-tooltip .tip-desc { font-size: 12px; line-height: 1.5; white-space: pre-line; color: var(--text); }
+
+/* Builds tab */
+.build-vs { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; flex-wrap: wrap; }
+.build-section { border-top: 1px solid var(--card-edge); margin-top: 16px; padding-top: 14px; }
+.build-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.build-title {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.build-champs { display: flex; gap: 4px; }
+.mini-champ {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--card-edge);
+}
+.build-section .muted { margin-top: 6px; }
+.build-items { margin-top: 10px; gap: 6px; }
+.build-items img { width: 34px; height: 34px; border-radius: 6px; }
 
 .kda { font-size: 13px; white-space: nowrap; }
 .kda .d { color: var(--red); }

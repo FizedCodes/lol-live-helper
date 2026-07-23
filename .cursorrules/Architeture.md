@@ -22,11 +22,22 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 ```
 
 ## Frontend (static/)
-- `index.html` — skeleton: header pills (key status + in-game status), setup card (Riot ID, sync, API key), scoreboard, two side-by-side `<details>` team panels, idle card.
-- `js/main.js` — entry point: event wiring, 10s live poll, 5min key-status poll.
-- `js/render.js` — pure HTML-string builders (playerRow, renderLive, renderSummary…). Champion/item icons from Data Dragon CDN.
+- `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Setup) + pills
+  (key status, in-game status). Each tab is a `.tab-page` section; hash router in main.js
+  shows one at a time (`#live`, `#builds`, `#stats`, `#setup`).
+- `js/main.js` — entry point: tab router, event wiring, 10s live poll, 5min key-status poll.
+  Keeps `lastLiveData` (live payload or last-game snapshot) for the Builds tab.
+- `js/render.js` — pure HTML-string builders (playerRow, renderLive, renderSummary…).
+- `js/items.js` — Data Dragon module: fetches current version + `item.json` + `champion.json`
+  once per load (`ready` promise; pinned-version fallback). Exports icon URL helpers,
+  `getItem()`/`getChampion()`, and `initItemTooltips()` (one shared hover tooltip; any element
+  with `data-item-id` gets it — name, gold, stripped description).
+- `js/builds.js` — `renderBuilds()`: rules-based counter items from enemy comp. Uses
+  champion.json `info` (attack/magic/defense) + `tags`, a curated healer set, and curated
+  item ID pools (filtered against item.json so stale IDs vanish on patch).
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
-- `style.css` — dark LoL-ish theme, CSS vars at top; rank tier colors; `#teams` grid for side-by-side.
+- `style.css` — dark LoL-ish theme, CSS vars at top; rank tier colors; `#teams` grid for
+  side-by-side; `.tabs` nav, `#item-tooltip`, `.build-*` sections.
 
 ## Important mechanics
 - **Active player identification**: live client's `activePlayer.riotId` matched against `allPlayers`.

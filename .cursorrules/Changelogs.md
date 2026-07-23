@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-22 (evening) — tabs, item tooltips, counter builds
+- **Tabs**: header nav (Live / Builds / Stats / Setup) using URL hashes (`#live`, `#builds`, …)
+  so each view is linkable. Stats summary and Setup card moved out of the main page into
+  their own tabs; small hash router in `js/main.js`.
+- **Item system fleshed out**: new `js/items.js` loads Data Dragon `item.json` +
+  `champion.json` once per page load. Hovering any item shows a styled tooltip
+  (name, gold cost, cleaned-up description). Player rows show total item gold;
+  trinkets get a gold border. Champion/item icon URL helpers moved here from render.js.
+- **Player names**: each player's Riot ID now renders under the champion name.
+- **Counter-builds tab**: new `js/builds.js` — rules-based item suggestions against the
+  current (or last) enemy team: armor vs AD-heavy comps, MR vs AP-heavy, anti-heal vs
+  healers (curated list), pen vs 2+ tanks, defensive items vs 2+ assassins. Suggestions
+  adapt to whether the user's champion is AD/AP/tank. Curated item IDs are filtered
+  against item.json so removed items drop out silently on new patches.
+
 ## 2026-07-22
 - **Enemy item tracker**: `/api/live` now includes each player's items from the live client;
   item icons render in every player row (updates within one 10s poll of a buy). Data Dragon

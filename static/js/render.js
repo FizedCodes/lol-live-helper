@@ -1,34 +1,20 @@
 // Pure rendering: functions take data and return HTML strings (or write to a container).
+import { champIconUrl, itemIconUrl, itemGold } from "./items.js";
 
-// Data Dragon CDN version: fetch the current one so new champs/items resolve;
-// fall back to a pinned version if the lookup fails.
-let ddVersion = "14.14.1";
-fetch("https://ddragon.leagueoflegends.com/api/versions.json")
-  .then((r) => r.json())
-  .then((versions) => { if (versions && versions[0]) ddVersion = versions[0]; })
-  .catch(() => {});
-
-// Data Dragon square icons use champion "id" keys; live client gives display names.
-// Normalizing common punctuation covers almost every champion.
-export function champIcon(name) {
-  const fixups = {
-    "Wukong": "MonkeyKing", "Renata Glasc": "Renata", "Nunu & Willump": "Nunu",
-  };
-  const key = fixups[name] || name.replace(/['. ]/g, "");
-  return `https://ddragon.leagueoflegends.com/cdn/${ddVersion}/img/champion/${key}.png`;
-}
-
-function itemIcon(id) {
-  return `https://ddragon.leagueoflegends.com/cdn/${ddVersion}/img/item/${id}.png`;
-}
+export const champIcon = champIconUrl;
 
 function itemsRow(items) {
   if (!items || !items.length) return "";
   const sorted = [...items].sort((a, b) => a.slot - b.slot);
   const icons = sorted.map((it) =>
-    `<img src="${itemIcon(it.id)}" alt="" title="${it.name}${it.count > 1 ? ` ×${it.count}` : ""}"
+    `<img src="${itemIconUrl(it.id)}" alt="" data-item-id="${it.id}"
+          class="${it.slot === 6 ? "trinket" : ""}"
           onerror="this.style.visibility='hidden'" />`).join("");
-  return `<div class="items">${icons}</div>`;
+  const gold = sorted.reduce((sum, it) => sum + itemGold(it.id) * (it.count || 1), 0);
+  const goldTag = gold > 0
+    ? `<span class="item-gold" title="Total gold spent on items">${gold.toLocaleString()}g</span>`
+    : "";
+  return `<div class="items">${icons}${goldTag}</div>`;
 }
 
 export function wrSpan(agg) {
@@ -82,6 +68,7 @@ function playerRow(p, meChamp) {
       <div class="name">${p.is_me ? "You — " : ""}${p.champion}
         ${p.is_lane_opponent ? '<span class="tag">YOUR LANE</span>' : ""}
         ${p.position ? `<span class="tag">${p.position}</span>` : ""}</div>
+      <div class="sub player-name">${p.riot_id || ""}</div>
       <div class="sub">${rankSpan(p.rank)}</div>
       ${stats}
       ${itemsRow(p.items)}

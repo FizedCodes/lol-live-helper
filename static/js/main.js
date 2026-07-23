@@ -1,9 +1,33 @@
 // Entry point: wires up the page, polls the backend, delegates rendering to render.js.
 import { api, post } from "./api.js";
 import { renderLive, renderSummary, timeAgo } from "./render.js";
+import { renderBuilds } from "./builds.js";
+import { ready as ddReady, initItemTooltips } from "./items.js";
 
 const $ = (id) => document.getElementById(id);
 const liveEls = { scoreboard: $("scoreboard"), enemies: $("enemies"), allies: $("allies") };
+
+// --- Tabs -----------------------------------------------------------------
+// Hash-based so every tab is linkable: /#live, /#builds, /#stats, /#setup.
+
+const TABS = ["live", "builds", "stats", "setup"];
+let lastLiveData = null; // latest payload with teams in it (live game or last-game snapshot)
+
+function currentTab() {
+  const t = location.hash.replace("#", "");
+  return TABS.includes(t) ? t : "live";
+}
+
+function showTab() {
+  const tab = currentTab();
+  for (const t of TABS) {
+    $(`tab-${t}`).classList.toggle("hidden", t !== tab);
+    document.querySelector(`.tabs a[data-tab="${t}"]`).classList.toggle("active", t === tab);
+  }
+  if (tab === "builds") renderBuilds(lastLiveData, $("builds-content"));
+  if (tab === "stats") loadSummary();
+}
+window.addEventListener("hashchange", showTab);
 
 // --- API key status ------------------------------------------------------
 
@@ -53,7 +77,6 @@ async function loadConfig() {
   if (cfg.game_name) $("game-name").value = cfg.game_name;
   if (cfg.tag_line) $("tag-line").value = cfg.tag_line;
   if (cfg.api_key) $("api-key").value = cfg.api_key;
-  $("setup").classList.remove("hidden");
 }
 
 $("save-config").addEventListener("click", async () => {
@@ -108,6 +131,7 @@ async function poll() {
       banner.classList.add("hidden");
       $("live").classList.remove("hidden");
       $("idle").classList.add("hidden");
+      lastLiveData = data;
       renderLive(data, liveEls);
     } else {
       pill.textContent = "Not in game";
@@ -121,19 +145,25 @@ async function poll() {
         banner.innerHTML = `LAST GAME · ${result}${timeAgo(lg.saved_at)}`;
         banner.classList.remove("hidden");
         $("live").classList.remove("hidden");
+        lastLiveData = lg.data;
         renderLive(lg.data, liveEls);
       } else {
         $("live").classList.add("hidden");
       }
     }
+    if (currentTab() === "builds") renderBuilds(lastLiveData, $("builds-content"));
   } catch {
     /* server briefly unavailable; retry on next tick */
   }
 }
 
+initItemTooltips();
+showTab();
 loadConfig();
 loadSummary();
 refreshKeyPill();
 setInterval(refreshKeyPill, 5 * 60 * 1000); // dev keys die every 24h; re-check occasionally
 poll();
 setInterval(poll, 10000);
+// Once Data Dragon catalogs land, re-render so gold totals + builds fill in.
+ddReady.then(() => poll());
