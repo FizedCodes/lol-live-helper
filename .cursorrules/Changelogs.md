@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-22 21:12 — Fight icons, recent matches, smurf check
+- **Fight compare UI**: stat chips with icons (KDA/CS/gold/AD/AP/Armor/MR/HP) sit under
+  each champ portrait; green/red tint shows who is ahead on that stat.
+- **Player recent matches**: `/api/player` returns the last ~8 games (champ, W/L, KDA, CS,
+  queue, time) rendered on the Player tab.
+- **Smurf / playtime check**: summoner level + ranked game volume + hot recent WR as soft
+  signals on the Player card (not proof — clearly labeled).
+
+## 2026-07-22 20:59 — Player tab + you-vs-them items
+- **Player tab**: one-click Riot ID lookup moved to its own `#player` tab (Live clicks jump there).
+- **Item compare**: player card now shows your items and the looked-up player's items side by side
+  (champ, KDA, CS, item gold + icons), refreshing from the live poll without re-calling Riot.
+
+## 2026-07-22 (late) — build order, champ hover, fight compare, player lookup
+- **Build order + paths**: Builds tab shows timed buy steps with component trees.
+  Item tooltips and ↑ badges show what each item builds from / into (Data Dragon).
+- **Champion hover panel**: hover a portrait for a sliding tip carousel, KDA/CS/gold,
+  and combat stats summed from equipped items (`js/hover.js`).
+- **Fight compare**: Live card compares you vs your lane opponent (KDA, CS, item gold,
+  AD/AP/Armor/MR/HP) with a TAKE THE FIGHT / EVEN / PLAY SAFE call.
+- **Player lookup**: click any Riot ID on Live, or search Name#Tag on Stats.
+  New `GET /api/player` returns solo/flex rank + win rate (`routes_player.py`).
+
 ## 2026-07-22 (night) — win rate tracker + builds revamp
 - **Win rate tracker**: new `matches` table stores queue + play time per game. `/api/stats`
   now returns overall / ranked / normals WR, per-champion table, and recently played champs.

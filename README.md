@@ -23,9 +23,10 @@ app/                    Python backend (FastAPI)
 static/                 Frontend (plain HTML/CSS/JS, no build step)
   index.html            page skeleton: tabs (Live / Builds / Stats / Setup)
   js/main.js            entry point: tab router, event wiring, 10s polling loop
-  js/render.js          pure HTML-building functions
-  js/items.js           Data Dragon catalogs (items + champions), icon URLs, hover tooltips
-  js/builds.js          counter-build suggestions from the enemy team comp
+  js/render.js          pure HTML-building functions (live, fight compare, stats, player card)
+  js/items.js           Data Dragon catalogs, icon URLs, item stats, build-path tooltips
+  js/builds.js          META core, build order, situational alternatives
+  js/hover.js           champion hover panel (tip slider + item-powered stats)
   js/api.js             fetch wrapper for backend calls
   style.css             all visuals
 ```

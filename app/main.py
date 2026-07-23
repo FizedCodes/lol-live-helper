@@ -4,6 +4,7 @@ Wiring only — the real logic lives in:
   routes_config.py  Riot ID + API key settings
   routes_sync.py    match history sync + aggregate stats
   routes_live.py    the live game view
+  routes_player.py  one-click / searchable player lookup
   analysis.py       play safe / push hard verdict rules
   ranks.py          League-V4 rank lookups (cached)
   riot.py           HTTP clients for Riot's APIs
@@ -19,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import routes_config, routes_live, routes_sync
+from app import routes_config, routes_live, routes_player, routes_sync
 
 load_dotenv()
 
@@ -36,4 +37,5 @@ async def index():
 app.include_router(routes_config.router)
 app.include_router(routes_sync.router)
 app.include_router(routes_live.router)
+app.include_router(routes_player.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

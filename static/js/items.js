@@ -1,5 +1,5 @@
-// Data Dragon data: game version, the full item catalog, icon URLs, and the
-// shared item hover tooltip. Everything here comes from Riot's free CDN
+// Data Dragon data: game version, the full item catalog, icon URLs, stats helpers,
+// and the shared item hover tooltip. Everything here comes from Riot's free CDN
 // (no API key), fetched once per page load.
 
 let version = "14.14.1"; // fallback if the version lookup fails
@@ -40,6 +40,69 @@ export function itemIconUrl(id) {
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/item/${id}.png`;
 }
 
+export function itemFrom(id) {
+  const it = getItem(id);
+  return (it && it.from) ? it.from.map(String) : [];
+}
+
+export function itemInto(id) {
+  const it = getItem(id);
+  return (it && it.into) ? it.into.map(String) : [];
+}
+
+// Human labels for the Flat* / Percent* keys Data Dragon uses.
+const STAT_LABELS = {
+  FlatHPPoolMod: "HP",
+  FlatMPPoolMod: "Mana",
+  FlatArmorMod: "Armor",
+  FlatSpellBlockMod: "MR",
+  FlatPhysicalDamageMod: "AD",
+  FlatMagicDamageMod: "AP",
+  FlatAttackSpeedMod: "AS",
+  PercentAttackSpeedMod: "AS%",
+  FlatCritChanceMod: "Crit",
+  FlatMovementSpeedMod: "MS",
+  PercentMovementSpeedMod: "MS%",
+  FlatHPRegenMod: "HP regen",
+  PercentLifeStealMod: "Life steal",
+};
+
+export function formatStatKey(key) {
+  return STAT_LABELS[key] || key.replace(/^Flat|^Percent|Mod$/g, "");
+}
+
+export function formatStatValue(key, value) {
+  if (key.startsWith("Percent") || key.includes("CritChance") || key.includes("LifeSteal")) {
+    return `${Math.round(value * 1000) / 10}%`;
+  }
+  if (key.includes("AttackSpeed") && value < 3) {
+    // Some patches use FlatAttackSpeedMod as a fraction.
+    return value < 1 ? `${Math.round(value * 1000) / 10}%` : String(Math.round(value));
+  }
+  return String(Math.round(value));
+}
+
+/** Sum Flat/Percent stats across a list of {id, count?} item slots. */
+export function sumItemStats(items) {
+  const totals = {};
+  for (const slot of items || []) {
+    const it = getItem(slot.id);
+    if (!it || !it.stats) continue;
+    const n = slot.count || 1;
+    for (const [k, v] of Object.entries(it.stats)) {
+      if (typeof v !== "number") continue;
+      totals[k] = (totals[k] || 0) + v * n;
+    }
+  }
+  return totals;
+}
+
+export function statsLines(stats) {
+  return Object.entries(stats || {})
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${formatStatValue(k, v)} ${formatStatKey(k)}`);
+}
+
 // Data Dragon square icons use champion "id" keys; the live client gives
 // display names. Normalizing punctuation covers almost every champion.
 export function champIconUrl(name) {
@@ -58,6 +121,13 @@ export function plainDescription(html) {
   return (doc.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function iconRow(ids) {
+  return ids
+    .filter((id) => getItem(id))
+    .map((id) => `<img src="${itemIconUrl(id)}" alt="" data-item-id="${id}" />`)
+    .join("");
+}
+
 // --- hover tooltip --------------------------------------------------------
 // One shared element for the whole page; any element with data-item-id shows it.
 
@@ -71,6 +141,13 @@ export function initItemTooltips() {
     const d = document.createElement("div");
     d.className = cls;
     d.textContent = text;
+    return d;
+  };
+
+  const htmlBlock = (cls, html) => {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.innerHTML = html;
     return d;
   };
 
@@ -89,18 +166,38 @@ export function initItemTooltips() {
   document.addEventListener("mouseover", (e) => {
     const el = e.target.closest && e.target.closest("[data-item-id]");
     if (!el) return;
+    // Don't fight the champion hover panel for focus.
+    if (e.target.closest("[data-champ-hover]")) return;
     const it = getItem(el.dataset.itemId);
     if (!it) return;
-    tip.replaceChildren(
+
+    const kids = [
       line("tip-name", it.name),
       line("tip-gold", `${it.gold.total} gold`),
-      line("tip-desc", plainDescription(it.description)),
-    );
+    ];
+    const from = itemFrom(el.dataset.itemId);
+    const into = itemInto(el.dataset.itemId);
+    if (from.length) {
+      kids.push(line("tip-path-label", "Builds from"));
+      kids.push(htmlBlock("tip-path", iconRow(from)));
+    }
+    if (into.length) {
+      kids.push(line("tip-path-label", "Builds into"));
+      kids.push(htmlBlock("tip-path", iconRow(into)));
+    }
+    const stats = statsLines(it.stats);
+    if (stats.length) kids.push(line("tip-stats", stats.join(" · ")));
+    kids.push(line("tip-desc", plainDescription(it.description)));
+
+    tip.replaceChildren(...kids);
     tip.classList.remove("hidden");
     move(e);
   });
   document.addEventListener("mousemove", move);
   document.addEventListener("mouseout", (e) => {
-    if (e.target.closest && e.target.closest("[data-item-id]")) tip.classList.add("hidden");
+    if (e.target.closest && e.target.closest("[data-item-id]")
+        && !e.relatedTarget?.closest?.("[data-item-id]")) {
+      tip.classList.add("hidden");
+    }
   });
 }

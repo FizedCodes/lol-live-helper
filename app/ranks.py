@@ -11,6 +11,11 @@ from app import config, riot
 _cache: dict[str, dict | None] = {}
 
 
+def cache_rank(riot_id: str, rank: dict | None) -> None:
+    """Seed the cache (e.g. after a manual player lookup)."""
+    _cache[riot_id] = rank
+
+
 async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
     """Resolve each Riot ID to its ranked entry (solo queue preferred, else flex)."""
     try:

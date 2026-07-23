@@ -1,9 +1,9 @@
-// Builds tab: a common META core for your champion, plus situational alternatives
-// based on what the enemy team is building / who they picked.
-// Riot doesn't publish "meta builds", so cores are curated archetypes (filtered
-// against the live Data Dragon item catalog so removed items drop out).
+// Builds tab: META core, suggested build order (when to buy), item component
+// trees, plus situational alternatives from the enemy team / their purchases.
 
-import { getChampion, getItem, itemIconUrl, champIconUrl } from "./items.js";
+import {
+  getChampion, getItem, itemIconUrl, champIconUrl, itemFrom, itemGold,
+} from "./items.js";
 
 const HEALERS = new Set([
   "Aatrox", "Dr. Mundo", "Illaoi", "Kayn", "Maokai", "Nami", "Rhaast", "Senna",
@@ -11,47 +11,49 @@ const HEALERS = new Set([
   "Yuumi", "Zac", "Briar", "Naafiri",
 ]);
 
+const BOOT_IDS = new Set([3006, 3009, 3020, 3047, 3111, 3117, 3158]);
+
 // Archetype META cores — typical completed items, not a full shopping list.
 const META_CORES = {
   adc: {
     label: "Crit ADC",
-    items: [6672, 3031, 3046, 3036, 3072, 3006], // Kraken, IE, PD, LDR, BT, Berserkers
+    items: [6672, 3031, 3046, 3036, 3072, 3006],
   },
   onhit: {
     label: "On-hit ADC",
-    items: [3153, 3091, 3085, 3078, 3047], // BotRK, Wit's End, Runaan's, Trinity, Steelcaps
+    items: [3153, 3091, 3085, 3078, 3047],
   },
   mage: {
     label: "Burst mage",
-    items: [6655, 4645, 3089, 3135, 3157, 3020], // Luden's/shadowfire era: Shadowflame, Rabadon, Void, Zhonya, Sorcs
+    items: [6655, 4645, 3089, 3135, 3157, 3020],
   },
   battlemage: {
     label: "Battle mage",
-    items: [6653, 3118, 3135, 3157, 3089, 3020], // Liandry's, Riftmaker-ish, Void, Zhonya, Rabadon
+    items: [6653, 3118, 3135, 3157, 3089, 3020],
   },
   assassin_ad: {
     label: "AD assassin",
-    items: [6691, 6693, 3036, 3814, 3142, 3158], // Duskblade/eclipse era: Youmuu, Opportunity, LDR, EoN, Ghostblade, Ionians
+    items: [6691, 6693, 3036, 3814, 3142, 3158],
   },
   assassin_ap: {
     label: "AP assassin",
-    items: [6655, 4645, 3089, 3135, 3102, 3020], // Luden-line, Shadowflame, Rabadon, Void, Banshee's
+    items: [6655, 4645, 3089, 3135, 3102, 3020],
   },
   bruiser: {
     label: "Bruiser",
-    items: [6631, 3078, 3053, 6333, 3742, 3047], // Goredrinker-line / Trinity, Sterak's, Death's Dance, Titanic, Steelcaps
+    items: [6631, 3078, 3053, 6333, 3742, 3047],
   },
   tank: {
     label: "Tank",
-    items: [3068, 3075, 3143, 3065, 3110, 3047], // Sunfire, Thornmail, Randuin's, Spirit Visage, Frozen Heart, Steelcaps
+    items: [3068, 3075, 3143, 3065, 3110, 3047],
   },
   enchanter: {
     label: "Enchanter support",
-    items: [6617, 3504, 3107, 3222, 3011, 3158], // Moonstone, Ardent, Redemption, Mikael's, Chemtech, Ionians
+    items: [6617, 3504, 3107, 3222, 3011, 3158],
   },
   catcher: {
     label: "Catcher support",
-    items: [3869, 3001, 3110, 3109, 3190, 3117], // support starting / Locket-line, Frozen Heart, Knight's Vow, Boots
+    items: [3869, 3001, 3110, 3109, 3190, 3117],
   },
 };
 
@@ -80,7 +82,6 @@ function pickArchetype(champName, position) {
   if (tags.includes("Tank") && (pos === "TOP" || pos === "JUNGLE" || p.defense >= 8)) return "tank";
   if (tags.includes("Assassin")) return isAp ? "assassin_ap" : "assassin_ad";
   if (pos === "BOTTOM" || (tags.includes("Marksman") && !tags.includes("Assassin"))) {
-    // On-hit lean for a few well-known names; everyone else gets crit.
     const onhit = new Set(["Varus", "Kog'Maw", "KogMaw", "Vayne", "Kai'Sa", "Twitch"]);
     return onhit.has(champName) ? "onhit" : "adc";
   }
@@ -96,12 +97,31 @@ function livingItems(ids) {
   return ids.filter((id) => getItem(id));
 }
 
+function itemIcon(id, extraClass = "") {
+  const into = (getItem(id)?.into || []).length;
+  const badge = into ? `<span class="into-badge" title="Builds into ${into} item(s)">↑${into}</span>` : "";
+  return `<span class="item-wrap ${extraClass}">
+    <img src="${itemIconUrl(id)}" alt="" data-item-id="${id}"
+         onerror="this.style.visibility='hidden'" />
+    ${badge}
+  </span>`;
+}
+
 function itemStrip(ids) {
-  const icons = livingItems(ids)
-    .map((id) => `<img src="${itemIconUrl(id)}" alt="" data-item-id="${id}"
-                       onerror="this.style.visibility='hidden'" />`)
-    .join("");
+  const icons = livingItems(ids).map((id) => itemIcon(id)).join("");
   return `<div class="items build-items">${icons}</div>`;
+}
+
+function componentTree(id) {
+  const from = itemFrom(id).filter((c) => getItem(c));
+  if (!from.length) return "";
+  return `<div class="component-row">
+    <span class="muted">from</span>
+    ${from.map((c) => itemIcon(c, "tiny")).join('<span class="plus">+</span>')}
+    <span class="arrow">→</span>
+    ${itemIcon(id)}
+    <span class="muted comp-gold">${itemGold(id).toLocaleString()}g</span>
+  </div>`;
 }
 
 function champStrip(names) {
@@ -123,7 +143,6 @@ function section(title, why, champs, itemIds) {
   </div>`;
 }
 
-// Tag helpers against whatever the enemy team has already purchased.
 function enemyItemTags(enemies) {
   let armor = 0, mr = 0, health = 0, heal = 0, total = 0;
   for (const e of enemies || []) {
@@ -135,7 +154,6 @@ function enemyItemTags(enemies) {
       if (tags.includes("Armor")) armor += 1;
       if (tags.includes("SpellBlock")) mr += 1;
       if (tags.includes("Health")) health += 1;
-      // Rough heal/shield signal from description text.
       const desc = (data.description || "").toLowerCase();
       if (desc.includes("heal") || desc.includes("omnivamp") || desc.includes("life steal")) heal += 1;
     }
@@ -151,13 +169,12 @@ function alternatives(meChamp, position, enemies) {
   const profiles = (enemies || []).map((e) => profile(e.champion)).filter(Boolean);
   const parts = [];
 
-  // Adapt to what they *bought*, not just who they picked.
   if (tags.armor >= 3) {
     parts.push(section(
       "They're stacking armor",
       "Several enemies already bought armor — swap a damage item for penetration or % health.",
       [],
-      iAmAp ? [3135, 6653] : [3036, 6694, 3153], // Void/Liandry vs LDR/Serylda/BotRK
+      iAmAp ? [3135, 6653] : [3036, 6694, 3153],
     ));
   }
   if (tags.mr >= 3) {
@@ -165,7 +182,7 @@ function alternatives(meChamp, position, enemies) {
       "They're stacking MR",
       "Magic resist is showing up on their team — magic pen or a physical pivot helps.",
       [],
-      iAmAp ? [3135, 4645] : [3036, 6676], // Void/Shadowflame vs LDR/Collector
+      iAmAp ? [3135, 4645] : [3036, 6676],
     ));
   }
   if (tags.health >= 4 || profiles.filter((p) => p.defense >= 8).length >= 2) {
@@ -186,7 +203,6 @@ function alternatives(meChamp, position, enemies) {
     ));
   }
 
-  // Comp-based counters (same idea as before, still useful early game before items).
   const adHeavy = profiles.filter((p) => p.attack >= p.magic + 2).map((p) => p.name);
   const apHeavy = profiles.filter((p) => p.magic >= p.attack + 2).map((p) => p.name);
   const assassins = profiles.filter((p) => p.tags.includes("Assassin")).map((p) => p.name);
@@ -219,6 +235,67 @@ function alternatives(meChamp, position, enemies) {
   return parts.filter(Boolean);
 }
 
+/** Split a META core into timed buy steps with component recipes. */
+function buildOrder(coreItems) {
+  const boots = coreItems.filter((id) => BOOT_IDS.has(Number(id)));
+  const legendaries = coreItems.filter((id) => !BOOT_IDS.has(Number(id)));
+  const steps = [];
+
+  steps.push({
+    when: "First back (~1100g)",
+    tip: "Pick up a long sword / chapter / kindlegem component, or rush boots if you're getting poked out of lane.",
+    ids: boots.length ? boots : legendaries.slice(0, 0),
+    showComponentsOf: legendaries[0] || null,
+  });
+
+  if (boots.length) {
+    steps.push({
+      when: "Boots",
+      tip: "Finish boots on your second back unless you're racing a spike — mobility saves more gold than it spends.",
+      ids: boots,
+    });
+  }
+
+  legendaries.forEach((id, i) => {
+    const name = getItem(id)?.name || "Item";
+    const labels = ["Mythic / first item", "Second item", "Third item", "Fourth item", "Fifth item", "Sixth item"];
+    steps.push({
+      when: `${labels[i] || `Item ${i + 1}`} · ${name}`,
+      tip: i === 0
+        ? "Complete your first legendary as soon as you can — it's the biggest power spike of the early game."
+        : i === 1
+          ? "Second item is usually your damage identity (crit, pen, mythic pair). Don't delay it for a luxury defensive."
+          : "Finish the core, then adapt — defensive or pen based on who's fed.",
+      ids: [id],
+      showComponentsOf: id,
+    });
+  });
+
+  return steps;
+}
+
+function renderOrder(coreItems) {
+  const steps = buildOrder(coreItems);
+  const cards = steps.map((s, idx) => {
+    const comps = s.showComponentsOf ? componentTree(s.showComponentsOf) : "";
+    const icons = livingItems(s.ids).map((id) => itemIcon(id)).join("") || comps;
+    if (!icons && !comps) return "";
+    return `<div class="order-step">
+      <div class="order-num">${idx + 1}</div>
+      <div class="order-body">
+        <div class="order-when">${s.when}</div>
+        <p class="muted">${s.tip}</p>
+        <div class="items build-items">${livingItems(s.ids).map((id) => itemIcon(id)).join("")}</div>
+        ${comps}
+      </div>
+    </div>`;
+  }).filter(Boolean).join("");
+
+  return `<h3>Build order</h3>
+    <p class="muted">Suggested buy timing. Hover items to see components and what they upgrade into.</p>
+    <div class="order-list">${cards}</div>`;
+}
+
 export function renderBuilds(data, container) {
   if (!data || !data.me) {
     container.innerHTML =
@@ -232,6 +309,15 @@ export function renderBuilds(data, container) {
   const core = META_CORES[archKey];
   const coreItems = livingItems(core.items);
 
+  // Owned items: grey out / mark what's already purchased.
+  const owned = new Set((data.allies || [])
+    .concat(data.enemies || [])
+    .filter((p) => p.is_me)
+    .flatMap((p) => (p.items || []).map((it) => String(it.id))));
+
+  const metaIcons = coreItems.map((id) =>
+    itemIcon(id, owned.has(String(id)) ? "owned" : "")).join("");
+
   const metaBlock = `<div class="build-section meta-core">
     <div class="build-head">
       <img class="mini-champ" src="${champIconUrl(meChamp)}" alt=""
@@ -240,10 +326,13 @@ export function renderBuilds(data, container) {
       ${position ? `<span class="tag">${position}</span>` : ""}
     </div>
     <p class="muted">Common completed items for ${meChamp}'s usual playstyle.
-      Treat this as a baseline — adapt with the alternatives below.</p>
-    ${coreItems.length ? itemStrip(coreItems)
+      ↑ badges mark components that build into other items. Green ring = you already own it.</p>
+    ${coreItems.length
+      ? `<div class="items build-items">${metaIcons}</div>`
       : '<p class="muted">Item data still loading…</p>'}
   </div>`;
+
+  const orderBlock = coreItems.length ? renderOrder(coreItems) : "";
 
   const alts = alternatives(meChamp, position, data.enemies || []);
   const vs = champStrip((data.enemies || []).map((e) => e.champion));
@@ -255,5 +344,5 @@ export function renderBuilds(data, container) {
        <p class="muted">Balanced lobby so far — stick to the META core and react if someone gets fed or stacks resists.</p>
        <div class="build-vs"><span class="muted">Against:</span> ${vs}</div>`;
 
-  container.innerHTML = metaBlock + altBlock;
+  container.innerHTML = metaBlock + orderBlock + altBlock;
 }

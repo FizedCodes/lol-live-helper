@@ -8,6 +8,7 @@ Browser (static/js/main.js, polls /api/live every 10s)
 FastAPI (app/main.py — wiring only, ~40 lines)
    ├── routes_live.py    GET /api/live: live client data + matchup stats + verdicts + ranks + items
    ├── routes_sync.py    POST /api/sync (match history pull), GET /api/stats
+   ├── routes_player.py  GET /api/player?riot_id=: ranks, smurf signals, recent matches
    └── routes_config.py  GET/POST /api/config (Riot ID), POST /api/key, GET /api/key/status
         │
         ├── riot.py      HTTP clients: fetch_live_game() → https://127.0.0.1:2999 (self-signed cert,
@@ -23,9 +24,9 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 ```
 
 ## Frontend (static/)
-- `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Setup) + pills
+- `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Player / Setup) + pills
   (key status, in-game status). Each tab is a `.tab-page` section; hash router in main.js
-  shows one at a time (`#live`, `#builds`, `#stats`, `#setup`).
+  shows one at a time (`#live`, `#builds`, `#stats`, `#player`, `#setup`).
 - `js/main.js` — entry point: tab router, event wiring, 10s live poll, 5min key-status poll.
   Keeps `lastLiveData` (live payload or last-game snapshot) for the Builds tab.
 - `js/render.js` — pure HTML-string builders (playerRow, renderLive, renderSummary…).
@@ -33,12 +34,13 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   once per load (`ready` promise; pinned-version fallback). Exports icon URL helpers,
   `getItem()`/`getChampion()`, and `initItemTooltips()` (one shared hover tooltip; any element
   with `data-item-id` gets it — name, gold, stripped description).
-- `js/builds.js` — `renderBuilds()`: META core by champion archetype + situational
-  alternatives from enemy picks and purchased item tags (armor/MR/heal). Curated item
-  IDs filtered against item.json so stale IDs vanish on patch.
+- `js/builds.js` — META core, timed build order with component trees, situational
+  alternatives. ↑ badges mark items that build into others.
+- `js/hover.js` — champion hover panel: tip slider animation + stats from equipped items.
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
-- `style.css` — dark LoL-ish theme, CSS vars at top; rank tier colors; `#teams` grid for
-  side-by-side; `.tabs` nav, `#item-tooltip`, `.build-*` sections.
+- `style.css` — dark LoL-ish theme, CSS vars at top; fight compare, champ hover, order steps.
+- Live: fight-compare card (you vs laner); clickable Riot IDs open player lookup card.
+- Stats: Riot ID search box hitting `/api/player`.
 
 ## Important mechanics
 - **Active player identification**: live client's `activePlayer.riotId` matched against `allPlayers`.

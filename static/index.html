@@ -13,6 +13,7 @@
       <a href="#live" data-tab="live">Live</a>
       <a href="#builds" data-tab="builds">Builds</a>
       <a href="#stats" data-tab="stats">Stats</a>
+      <a href="#player" data-tab="player">Player</a>
       <a href="#setup" data-tab="setup">Setup</a>
     </nav>
     <div class="pills">
@@ -26,6 +27,7 @@
       <div id="live-banner" class="banner hidden"></div>
       <div id="live" class="hidden">
         <div id="scoreboard" class="card"></div>
+        <div id="fight"></div>
         <div id="teams">
           <details id="ally-panel" open>
             <summary>Your team</summary>
@@ -40,15 +42,16 @@
       <div id="idle" class="card hidden">
         <h2>Not in a game</h2>
         <p class="muted">Start a match and this page will update automatically.
-          Your synced stats live in the <a href="#stats">Stats</a> tab.</p>
+          Your synced stats live in the <a href="#stats">Stats</a> tab.
+          Click any Riot ID to open the <a href="#player">Player</a> tab.</p>
       </div>
     </section>
 
     <section id="tab-builds" class="tab-page hidden">
       <div class="card">
         <h2>Builds</h2>
-        <p class="muted">A common META core for your champ, plus situational alternatives based on
-          the enemy team and what they're buying. Hover any item to see what it does.</p>
+        <p class="muted">META core, suggested buy order with component trees, and situational
+          alternatives. Hover items for build paths; hover champ portraits for tips + item stats.</p>
         <div id="builds-content"></div>
       </div>
     </section>
@@ -58,6 +61,20 @@
         <h2>Win rate tracker</h2>
         <p class="muted">Your personal win rates from synced match history — ranked, normals, and per champion.</p>
         <div id="summary"></div>
+      </div>
+    </section>
+
+    <section id="tab-player" class="tab-page hidden">
+      <div class="card">
+        <h2>Player lookup</h2>
+        <p class="muted">Search any Riot ID, or click a name on the Live tab. During a game this
+          also shows <b>your items vs theirs</b> side by side.</p>
+        <div class="row">
+          <input id="player-search" class="wide" placeholder="Name#Tag" />
+          <button id="player-search-btn">Search</button>
+          <span id="player-search-status" class="muted"></span>
+        </div>
+        <div id="player-search-result"></div>
       </div>
     </section>
 

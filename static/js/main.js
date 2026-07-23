@@ -1,17 +1,24 @@
 // Entry point: wires up the page, polls the backend, delegates rendering to render.js.
 import { api, post } from "./api.js";
-import { renderLive, renderSummary, timeAgo } from "./render.js";
+import { renderLive, renderSummary, renderPlayerCard, timeAgo } from "./render.js";
 import { renderBuilds } from "./builds.js";
 import { ready as ddReady, initItemTooltips } from "./items.js";
+import { initChampHover } from "./hover.js";
 
 const $ = (id) => document.getElementById(id);
-const liveEls = { scoreboard: $("scoreboard"), enemies: $("enemies"), allies: $("allies") };
+const liveEls = {
+  scoreboard: $("scoreboard"),
+  enemies: $("enemies"),
+  allies: $("allies"),
+  fight: $("fight"),
+};
 
 // --- Tabs -----------------------------------------------------------------
 // Hash-based so every tab is linkable: /#live, /#builds, /#stats, /#setup.
 
-const TABS = ["live", "builds", "stats", "setup"];
+const TABS = ["live", "builds", "stats", "player", "setup"];
 let lastLiveData = null; // latest payload with teams in it (live game or last-game snapshot)
+let lastPlayerLookup = null; // cached /api/player payload so polls only refresh items
 
 function currentTab() {
   const t = location.hash.replace("#", "");
@@ -60,7 +67,7 @@ $("save-key").addEventListener("click", async () => {
   try {
     const key = $("api-key").value.trim();
     await post("/api/key", { key });
-    $("api-key").value = key; // keep visible so you can confirm what was saved
+    $("api-key").value = key;
     $("key-status").textContent = "✓ Key accepted and saved.";
     refreshKeyPill();
   } catch (e) {
@@ -118,6 +125,71 @@ async function loadSummary() {
   } catch { /* non-critical */ }
 }
 
+// --- Player lookup (one-click + search) ----------------------------------
+
+function findLivePlayer(riotId) {
+  if (!lastLiveData || !riotId) return null;
+  return [...(lastLiveData.enemies || []), ...(lastLiveData.allies || [])]
+    .find((p) => p.riot_id === riotId) || null;
+}
+
+function meFromLive() {
+  if (!lastLiveData) return null;
+  return (lastLiveData.allies || []).find((p) => p.is_me) || null;
+}
+
+function paintPlayerCard(p) {
+  const box = $("player-search-result");
+  renderPlayerCard(p, box, {
+    them: findLivePlayer(p.riot_id),
+    me: meFromLive(),
+  });
+  const close = box.querySelector("#player-card-close");
+  if (close) close.addEventListener("click", () => {
+    lastPlayerLookup = null;
+    box.innerHTML = "";
+    $("player-search").value = "";
+  });
+}
+
+async function showPlayer(riotId) {
+  const box = $("player-search-result");
+  $("player-search").value = riotId;
+  box.innerHTML = `<p class="muted">Looking up ${riotId}…</p>`;
+  try {
+    const p = await api(`/api/player?riot_id=${encodeURIComponent(riotId)}`);
+    lastPlayerLookup = p;
+    paintPlayerCard(p);
+  } catch (e) {
+    lastPlayerLookup = null;
+    box.innerHTML = `<p class="error">${e.message}</p>`;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("[data-riot-id]");
+  if (!btn) return;
+  e.preventDefault();
+  // One-click from Live (or anywhere) jumps to the Player tab.
+  if (location.hash !== "#player") location.hash = "#player";
+  showPlayer(btn.dataset.riotId);
+});
+
+$("player-search-btn").addEventListener("click", async () => {
+  const q = $("player-search").value.trim();
+  $("player-search-status").textContent = "";
+  if (!q.includes("#")) {
+    $("player-search-status").textContent = "Use Name#Tag format.";
+    return;
+  }
+  $("player-search-status").textContent = "Searching…";
+  await showPlayer(q);
+  $("player-search-status").textContent = "";
+});
+$("player-search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("player-search-btn").click();
+});
+
 // --- Live polling --------------------------------------------------------
 
 async function poll() {
@@ -152,18 +224,20 @@ async function poll() {
       }
     }
     if (currentTab() === "builds") renderBuilds(lastLiveData, $("builds-content"));
+    // Refresh you-vs-them items on the Player tab without re-hitting Riot.
+    if (currentTab() === "player" && lastPlayerLookup) paintPlayerCard(lastPlayerLookup);
   } catch {
     /* server briefly unavailable; retry on next tick */
   }
 }
 
 initItemTooltips();
+initChampHover();
 showTab();
 loadConfig();
 loadSummary();
 refreshKeyPill();
-setInterval(refreshKeyPill, 5 * 60 * 1000); // dev keys die every 24h; re-check occasionally
+setInterval(refreshKeyPill, 5 * 60 * 1000);
 poll();
 setInterval(poll, 10000);
-// Once Data Dragon catalogs land, re-render so gold totals + builds fill in.
 ddReady.then(() => poll());

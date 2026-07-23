@@ -87,6 +87,14 @@ class RiotWebApi:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_summoner_by_puuid(self, client: httpx.AsyncClient, puuid: str) -> dict:
+        """Summoner profile (level, icon). Requires a platform (e.g. na1)."""
+        url = f"{self.platform}/lol/summoner/v4/summoners/by-puuid/{puuid}"
+        resp = await client.get(url, headers=self.headers)
+        _check_key_rejection(resp)
+        resp.raise_for_status()
+        return resp.json()
+
     async def get_account(self, game_name: str, tag_line: str) -> dict:
         """Verify a Riot ID exists and return the account (canonical gameName/tagLine + puuid)."""
         url = f"{self.host}/riot/account/v1/accounts/by-riot-id/{game_name}/{tag_line}"
