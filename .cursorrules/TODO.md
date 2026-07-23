@@ -1,4 +1,7 @@
 --add ai intergration for paid users [later]
-
---player look up has multiple matches that the player played <!-- done: Player tab shows last ~8 matches (champ/KDA/CS/queue/when) -->
---play time checker for smurfs <!-- done: summoner level + ranked volume + recent WR soft signals on Player tab -->
+--add more signals for smurfs some profiles are being missed profiled
+--work on runes setups <!-- done: fight card shows you vs foe runes (live client + Data Dragon icons) -->
+--add move speed indecator, add armour add ap, attack speed, ability haste, crit indecators <!-- partial: fight chips cover AD/AP/Armor/MR/HP/AS/crit/MS from items; AH not in item Flat stats -->
+--builds tab should be dynaic and update items as players buy it replacing options if needed.
+--build order should be an optional drop down
+--fight compare should allow swap champ options for look up of stats of champs in different lanes. <!-- done: Compare vs dropdown on fight card -->

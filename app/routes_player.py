@@ -1,12 +1,18 @@
 """One-click / searchable player lookup via Riot Account + League-V4 + recent matches."""
 from __future__ import annotations
 
+import time
+
 import httpx
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app import config, ranks, riot
 
 router = APIRouter(prefix="/api")
+
+# Show enough games that a 10–20 games/day player still looks "today-heavy".
+RECENT_MATCH_COUNT = 20
 
 QUEUE_LABELS = {
     400: "Normal Draft",
@@ -16,6 +22,12 @@ QUEUE_LABELS = {
     450: "ARAM",
     490: "Quickplay",
     700: "Clash",
+    830: "Intro Bots",
+    840: "Beginner Bots",
+    850: "Intermediate Bots",
+    890: "Intermediate Bots",
+    900: "ARURF",
+    1020: "One for All",
     1700: "Arena",
 }
 
@@ -75,17 +87,44 @@ def _smurf_signal(level: int | None, ranked_games: int, recent: list[dict]) -> d
     }
 
 
-async def _recent_matches(api: riot.RiotWebApi, client: httpx.AsyncClient, puuid: str, count: int = 8) -> list[dict]:
-    try:
-        ids = await api.get_match_ids(puuid, count)
-    except Exception:
-        return []
+def _played_at(info: dict) -> int:
+    """Epoch seconds for when the game actually started (fallback: lobby create time)."""
+    ms = info.get("gameStartTimestamp") or info.get("gameCreation") or 0
+    return int(ms // 1000)
 
-    out = []
+
+async def _recent_matches(
+    api: riot.RiotWebApi, client: httpx.AsyncClient, puuid: str, count: int = RECENT_MATCH_COUNT
+) -> tuple[list[dict], str | None]:
+    """Fetch newest matches with 429 retries. Returns (matches, warning_or_none)."""
+    # Prefer the last ~14 days so the list can't silently drift to stale seasons.
+    start_time = int(time.time()) - 14 * 86400
+    try:
+        ids = await api.get_match_ids(puuid, count, client, start_time=start_time)
+    except RuntimeError as e:
+        return [], str(e)
+    except Exception as e:
+        return [], f"Could not load match list: {e}"
+
+    if not ids:
+        # Fallback without startTime in case Riot's filter misbehaves for this account.
+        try:
+            ids = await api.get_match_ids(puuid, count, client)
+        except Exception as e:
+            return [], f"Could not load match list: {e}"
+
+    out: list[dict] = []
+    warning = None
     for match_id in ids:
-        match = await api.get_match(client, match_id)
-        if match is None:
-            break  # rate limited — return what we have
+        match, status = await api.fetch_match(client, match_id)
+        if status == "rate_limited":
+            warning = (
+                "Riot rate-limited mid-lookup — showing partial history. "
+                "Wait ~2 minutes and search again for the full list."
+            )
+            break
+        if status == "missing" or match is None:
+            continue
         info = match.get("info") or {}
         me = next((p for p in info.get("participants", []) if p.get("puuid") == puuid), None)
         if not me:
@@ -102,9 +141,11 @@ async def _recent_matches(api: riot.RiotWebApi, client: httpx.AsyncClient, puuid
             "queue_id": queue_id,
             "queue": QUEUE_LABELS.get(queue_id, f"Queue {queue_id}"),
             "duration": info.get("gameDuration", 0),
-            "played_at": int((info.get("gameCreation") or 0) // 1000),
+            "played_at": _played_at(info),
         })
-    return out
+
+    out.sort(key=lambda m: m.get("played_at") or 0, reverse=True)
+    return out, warning
 
 
 @router.get("/player")
@@ -117,6 +158,13 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
     if not name or not tag:
         raise HTTPException(status_code=400, detail="Riot ID must look like Name#Tag.")
 
+    # Practice-tool / custom bots aren't real accounts with useful history.
+    if tag.upper() == "BOT" or name.lower().endswith(" bot"):
+        raise HTTPException(
+            status_code=400,
+            detail="That looks like a co-op vs AI / practice bot, not a real player.",
+        )
+
     try:
         api = riot.RiotWebApi(config.region(), config.platform())
         account = await api.get_account(name, tag)
@@ -127,8 +175,9 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
     puuid = account["puuid"]
 
     level = None
+    warning = None
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             try:
                 summoner = await api.get_summoner_by_puuid(client, puuid)
                 level = summoner.get("summonerLevel")
@@ -138,7 +187,7 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
                 entries = await api.get_league_entries(client, puuid)
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Could not fetch ranks: {e}")
-            recent = await _recent_matches(api, client, puuid, count=8)
+            recent, warning = await _recent_matches(api, client, puuid, count=RECENT_MATCH_COUNT)
     except HTTPException:
         raise
     except Exception as e:
@@ -170,7 +219,7 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
         summary_flex["games"] if summary_flex else 0
     )
 
-    return {
+    payload = {
         "riot_id": canonical,
         "puuid": puuid,
         "solo": summary_solo,
@@ -178,4 +227,10 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
         "summoner_level": level,
         "smurf": _smurf_signal(level, ranked_games, recent),
         "recent_matches": recent,
+        "matches_warning": warning,
     }
+    # Prevent browsers from serving a stale lookup from an earlier session.
+    return JSONResponse(
+        content=payload,
+        headers={"Cache-Control": "no-store"},
+    )

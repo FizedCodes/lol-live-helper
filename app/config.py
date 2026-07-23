@@ -18,6 +18,23 @@ def sync_match_count() -> int:
     return int(os.environ.get("SYNC_MATCH_COUNT", "200"))
 
 
+# Stay under Riot personal-key defaults (20/1s, 100/2min) with a little headroom.
+def riot_rate_limit_short() -> int:
+    return int(os.environ.get("RIOT_RATE_LIMIT_SHORT", "18"))
+
+
+def riot_rate_limit_short_window() -> float:
+    return float(os.environ.get("RIOT_RATE_LIMIT_SHORT_WINDOW", "1"))
+
+
+def riot_rate_limit_long() -> int:
+    return int(os.environ.get("RIOT_RATE_LIMIT_LONG", "90"))
+
+
+def riot_rate_limit_long_window() -> float:
+    return float(os.environ.get("RIOT_RATE_LIMIT_LONG_WINDOW", "120"))
+
+
 def _env_key() -> str | None:
     key = os.environ.get("RIOT_API_KEY", "").strip()
     if not key or key.startswith("RGAPI-your"):

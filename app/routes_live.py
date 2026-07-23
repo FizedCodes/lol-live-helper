@@ -33,6 +33,48 @@ def _items_of(p: dict) -> list[dict]:
     ]
 
 
+def _rune_bits(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
+    return {
+        "id": obj.get("id"),
+        "name": obj.get("displayName") or obj.get("rawDisplayName") or "",
+    }
+
+
+def _runes_of(p: dict, *, full: dict | None = None) -> dict | None:
+    """Normalize live-client rune payloads into a small frontend-friendly shape.
+
+    allPlayers usually only has keystone + trees. activePlayer.fullRunes also
+    includes the full perk row and stat shards when available.
+    """
+    src = full or p.get("runes") or {}
+    if not src:
+        return None
+    keystone = _rune_bits(src.get("keystone"))
+    primary = _rune_bits(src.get("primaryRuneTree"))
+    secondary = _rune_bits(src.get("secondaryRuneTree"))
+    perks = [_rune_bits(r) for r in (src.get("generalRunes") or []) if r]
+    shards = []
+    for r in src.get("statRunes") or []:
+        if not r:
+            continue
+        # Stat shards often lack displayName — keep id for icon lookup.
+        shards.append({
+            "id": r.get("id"),
+            "name": r.get("displayName") or r.get("rawDescription") or f"Shard {r.get('id')}",
+        })
+    if not any([keystone, primary, secondary, perks, shards]):
+        return None
+    return {
+        "keystone": keystone,
+        "primary": primary,
+        "secondary": secondary,
+        "perks": [x for x in perks if x],
+        "shards": shards,
+    }
+
+
 @router.get("/live")
 async def live():
     game = await riot.fetch_live_game()
@@ -55,6 +97,7 @@ async def live():
     my_champ = me.get("championName", "")
     my_team = me.get("team")
     my_pos = (me.get("position") or "").upper()
+    my_full_runes = (active.get("fullRunes") or None)
 
     conn = store.connect()
     try:
@@ -71,6 +114,7 @@ async def live():
                 "position": (p.get("position") or "").upper(),
                 "scores": _scores_of(p),
                 "items": _items_of(p),
+                "runes": _runes_of(p, full=my_full_runes if p is me else None),
                 "is_dead": bool(p.get("isDead")),
                 "is_me": p is me,
             }

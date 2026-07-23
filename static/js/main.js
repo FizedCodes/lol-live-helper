@@ -2,6 +2,7 @@
 import { api, post } from "./api.js";
 import { renderLive, renderSummary, renderPlayerCard, timeAgo } from "./render.js";
 import { renderBuilds } from "./builds.js";
+import { renderFight } from "./fight.js";
 import { ready as ddReady, initItemTooltips } from "./items.js";
 import { initChampHover } from "./hover.js";
 
@@ -172,7 +173,7 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   // One-click from Live (or anywhere) jumps to the Player tab.
   if (location.hash !== "#player") location.hash = "#player";
-  showPlayer(btn.dataset.riotId);
+  showPlayer(decodeURIComponent(btn.dataset.riotId || ""));
 });
 
 $("player-search-btn").addEventListener("click", async () => {
@@ -205,6 +206,7 @@ async function poll() {
       $("idle").classList.add("hidden");
       lastLiveData = data;
       renderLive(data, liveEls);
+      renderFight(data, liveEls.fight);
     } else {
       pill.textContent = "Not in game";
       pill.className = "pill idle";
@@ -219,8 +221,10 @@ async function poll() {
         $("live").classList.remove("hidden");
         lastLiveData = lg.data;
         renderLive(lg.data, liveEls);
+        renderFight(lg.data, liveEls.fight);
       } else {
         $("live").classList.add("hidden");
+        if (liveEls.fight) liveEls.fight.innerHTML = "";
       }
     }
     if (currentTab() === "builds") renderBuilds(lastLiveData, $("builds-content"));

@@ -1,9 +1,28 @@
 # Changelog
 
+## 2026-07-22 22:59 — Fight compare champ swap + rune setups
+- **Fight card**: dropdown to compare vs any enemy (not only laner); selection sticks
+  across the 10s live poll. Same card now shows both players' rune setups
+  (keystone, trees, full perk row + shards when the live client provides them).
+- **Data**: `/api/live` includes normalized `runes` per player; Data Dragon
+  `runesReforged.json` powers icons/names in `items.js`. New `js/fight.js` owns
+  the compare + runes UI. Combat chips also surface AS / crit / MS when items give them.
+
+## 2026-07-22 22:35 — Player lookup fix + shared Riot rate limiter
+- **Player match history**: lookups retry on 429, pull up to 20 games (14-day window),
+  skip missing match files, sort by start time, and send `Cache-Control: no-store`.
+  Each row shows relative time plus a local date/time; partial results warn explicitly.
+  Practice-tool `#BOT` names are rejected.
+- **Self-throttle**: every Riot web call shares one process-wide sliding-window limiter
+  (default **18/1s** and **90/2min**, under personal-key caps). Override with
+  `RIOT_RATE_LIMIT_*` env vars. 429 responses still honor `Retry-After`.
+- **Live ranks**: still cached for the process lifetime; spacing now comes from the
+  shared limiter instead of a separate concurrency cap.
+
 ## 2026-07-22 21:12 — Fight icons, recent matches, smurf check
 - **Fight compare UI**: stat chips with icons (KDA/CS/gold/AD/AP/Armor/MR/HP) sit under
   each champ portrait; green/red tint shows who is ahead on that stat.
-- **Player recent matches**: `/api/player` returns the last ~8 games (champ, W/L, KDA, CS,
+- **Player recent matches**: `/api/player` returns recent games (champ, W/L, KDA, CS,
   queue, time) rendered on the Player tab.
 - **Smurf / playtime check**: summoner level + ranked game volume + hot recent WR as soft
   signals on the Player card (not proof — clearly labeled).

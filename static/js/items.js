@@ -5,6 +5,7 @@
 let version = "14.14.1"; // fallback if the version lookup fails
 let itemData = {};       // item id (string) -> entry from item.json
 let champByName = {};    // display name ("Wukong") -> entry from champion.json
+let runeById = {};       // perk / style id (number) -> { name, icon, ... }
 
 // Resolves once the version + catalogs are loaded (or failed gracefully).
 export const ready = (async () => {
@@ -22,11 +23,27 @@ export const ready = (async () => {
       `https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion.json`)).json();
     for (const entry of Object.values(data.data || {})) champByName[entry.name] = entry;
   } catch { /* builds tab falls back to generic advice */ }
+  try {
+    const trees = await (await fetch(
+      `https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/runesReforged.json`)).json();
+    for (const tree of trees || []) {
+      runeById[tree.id] = { id: tree.id, name: tree.name, icon: tree.icon, kind: "tree" };
+      for (const slot of tree.slots || []) {
+        for (const rune of slot.runes || []) {
+          runeById[rune.id] = {
+            id: rune.id, name: rune.name, icon: rune.icon,
+            kind: "perk", shortDesc: rune.shortDesc || "",
+          };
+        }
+      }
+    }
+  } catch { /* fight card still shows live-client display names without icons */ }
 })();
 
 export function ddVersion() { return version; }
 export function allItems() { return itemData; }
 export function getItem(id) { return itemData[String(id)] || null; }
+export function getRune(id) { return runeById[Number(id)] || null; }
 
 // Champion catalog entry (info scores, tags) by display name from the live client.
 export function getChampion(name) { return champByName[name] || null; }
@@ -48,6 +65,21 @@ export function itemFrom(id) {
 export function itemInto(id) {
   const it = getItem(id);
   return (it && it.into) ? it.into.map(String) : [];
+}
+
+/** Data Dragon rune / tree icon. Stat shards fall back to a generic perk path. */
+export function runeIconUrl(id) {
+  const r = getRune(id);
+  if (r && r.icon) {
+    return `https://ddragon.leagueoflegends.com/cdn/img/${r.icon}`;
+  }
+  // Unknown ids (often stat shards) — hide via onerror on the <img>.
+  return `https://ddragon.leagueoflegends.com/cdn/img/perk-images/StatMods/StatModsAdaptiveForceIcon.png`;
+}
+
+export function runeName(id, fallback = "") {
+  const r = getRune(id);
+  return (r && r.name) || fallback || `Rune ${id}`;
 }
 
 // Human labels for the Flat* / Percent* keys Data Dragon uses.

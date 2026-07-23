@@ -28,7 +28,8 @@ async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
             return rid, _cache[rid]
         try:
             name, tag = rid.split("#", 1)
-            account = await api.get_account(name, tag)
+            # Shared Riot rate limiter spaces these out; gather just pipelines the waits.
+            account = await api.get_account(name, tag, client)
             entries = await api.get_league_entries(client, account["puuid"])
             solo = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
             flex = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)

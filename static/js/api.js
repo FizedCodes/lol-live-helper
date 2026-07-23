@@ -1,6 +1,6 @@
 // Thin wrapper over fetch: all backend calls go through here.
-export async function api(path, opts) {
-  const resp = await fetch(path, opts);
+export async function api(path, opts = {}) {
+  const resp = await fetch(path, { cache: "no-store", ...opts });
   const body = await resp.json();
   if (!resp.ok) throw new Error(body.detail || resp.statusText);
   return body;

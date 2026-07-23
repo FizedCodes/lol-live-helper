@@ -14,6 +14,8 @@ FastAPI (app/main.py — wiring only, ~40 lines)
         ├── riot.py      HTTP clients: fetch_live_game() → https://127.0.0.1:2999 (self-signed cert,
         │                verify=False, returns None when not in game); RiotWebApi → Account-V1,
         │                Match-V5 (regional host), League-V4 (platform host); validate_key()
+        │                All Riot web GETs go through rate_limit.py (shared 18/1s + 90/2min).
+        ├── rate_limit.py Sliding-window limiter shared by every RiotWebApi request
         ├── store.py     SQLite (data/helper.db): meta + matchups + matches (queue/time);
         │                matchup_stats(), champ_overall(), queue_win_rate(), summary(),
         │                record_match()
@@ -36,6 +38,8 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   with `data-item-id` gets it — name, gold, stripped description).
 - `js/builds.js` — META core, timed build order with component trees, situational
   alternatives. ↑ badges mark items that build into others.
+- `js/fight.js` — Live fight compare card: enemy dropdown, item-powered call,
+  side-by-side rune setups (Data Dragon icons).
 - `js/hover.js` — champion hover panel: tip slider animation + stats from equipped items.
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
 - `style.css` — dark LoL-ish theme, CSS vars at top; fight compare, champ hover, order steps.
@@ -45,6 +49,9 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 ## Important mechanics
 - **Active player identification**: live client's `activePlayer.riotId` matched against `allPlayers`.
 - **Lane opponent**: enemy with same `position` as user; sorted first, gold highlight.
+- **Player recent matches**: `/api/player` pulls Match-V5 ids (14-day window, up to 20),
+  retries on 429, skips 404 match files, sorts by start time. Live rank fetches are
+  concurrency-limited so they don't starve match lookups on the shared dev key.
 - **Last game replay**: every in-game poll snapshots the full `/api/live` payload to meta key
   `last_game` (JSON with `saved_at`). When not in game, that snapshot is returned and rendered
   with a "LAST GAME" banner; win/loss comes from the live client's `GameEnd` event when caught.
