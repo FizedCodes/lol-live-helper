@@ -1,7 +1,8 @@
-// Fight compare card: pick any enemy to compare against, show item-powered
-// fight call + both rune setups in the same panel.
+// Fight compare card: pick any enemy to compare against, show fight call +
+// both rune setups. Your combat chips prefer live client championStats
+// (real AD/AP/Armor/MR/HP/AS/crit/MS/AH); enemies stay item-estimated.
 import {
-  champIconUrl, itemGold, sumItemStats, formatStatValue,
+  champIconUrl, itemGold, sumItemStats, combatProfile, formatCombatValue,
   runeIconUrl, runeName, getRune,
 } from "./items.js";
 
@@ -15,6 +16,7 @@ function gameClock(seconds) {
   return `${m}:${s}`;
 }
 
+/** Item-only power — used for the fight call so you vs foe stays apple-to-apple. */
 function powerScore(stats) {
   return (stats.FlatPhysicalDamageMod || 0)
     + (stats.FlatMagicDamageMod || 0)
@@ -40,6 +42,7 @@ const ICONS = {
   as: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3 8h10 M8 3v10 M4.5 4.5l7 7 M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
   ms: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 9 L7 3 L7 7 L14 7 L9 13 L9 9 Z"/></svg>',
   crit: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1 L10 6 L15 6 L11 9 L13 14 L8 11 L3 14 L5 9 L1 6 L6 6 Z"/></svg>',
+  ah: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4v4l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
 };
 
 function esc(s) {
@@ -57,6 +60,8 @@ function hoverPayload(p, ctx) {
       position: p.position,
       scores: p.scores,
       items: p.items,
+      live_stats: p.live_stats || null,
+      level: p.level,
       is_me: !!p.is_me,
       is_dead: !!p.is_dead,
       is_lane_opponent: !!p.is_lane_opponent,
@@ -73,40 +78,54 @@ function statChip(icon, value, title, cls = "") {
   </div>`;
 }
 
-function chipsFor(player, other, sideStats, otherStats) {
+function combatVal(profile, key) {
+  if (key === "ms" && profile.source === "items" && !profile.ms && profile.msPercent) {
+    return profile.msPercent;
+  }
+  return profile[key] || 0;
+}
+
+function chipsFor(player, other, side, otherSide) {
   const gold = (player.items || []).reduce((s, it) => s + itemGold(it.id) * (it.count || 1), 0);
   const otherGold = (other.items || []).reduce((s, it) => s + itemGold(it.id) * (it.count || 1), 0);
   const csCls = player.scores.cs === other.scores.cs ? ""
     : player.scores.cs > other.scores.cs ? "good" : "bad";
+  // Live totals vs item bonuses aren't comparable — only tint when sources match.
+  const canCompare = side.source === otherSide.source;
+  const srcLabel = side.source === "live" ? "live client (total)" : "from items (bonus)";
+
   const combatKeys = [
-    ["FlatPhysicalDamageMod", ICONS.ad, "AD"],
-    ["FlatMagicDamageMod", ICONS.ap, "AP"],
-    ["FlatArmorMod", ICONS.armor, "Armor"],
-    ["FlatSpellBlockMod", ICONS.mr, "MR"],
-    ["FlatHPPoolMod", ICONS.hp, "HP"],
+    ["ad", ICONS.ad, "AD"],
+    ["ap", ICONS.ap, "AP"],
+    ["armor", ICONS.armor, "Armor"],
+    ["mr", ICONS.mr, "MR"],
+    ["hp", ICONS.hp, "HP"],
   ];
-  // Prefer percent AS when present; otherwise flat.
-  if ((sideStats.PercentAttackSpeedMod || 0) || (otherStats.PercentAttackSpeedMod || 0)) {
-    combatKeys.push(["PercentAttackSpeedMod", ICONS.as, "Attack speed"]);
-  } else if ((sideStats.FlatAttackSpeedMod || 0) || (otherStats.FlatAttackSpeedMod || 0)) {
-    combatKeys.push(["FlatAttackSpeedMod", ICONS.as, "Attack speed"]);
+  if (combatVal(side, "as") || combatVal(otherSide, "as")) {
+    combatKeys.push(["as", ICONS.as, "Attack speed"]);
   }
-  if ((sideStats.FlatCritChanceMod || 0) || (otherStats.FlatCritChanceMod || 0)) {
-    combatKeys.push(["FlatCritChanceMod", ICONS.crit, "Crit"]);
+  if (combatVal(side, "crit") || combatVal(otherSide, "crit")) {
+    combatKeys.push(["crit", ICONS.crit, "Crit"]);
   }
-  if ((sideStats.FlatMovementSpeedMod || 0) || (otherStats.FlatMovementSpeedMod || 0)) {
-    combatKeys.push(["FlatMovementSpeedMod", ICONS.ms, "Move speed"]);
-  } else if ((sideStats.PercentMovementSpeedMod || 0) || (otherStats.PercentMovementSpeedMod || 0)) {
-    combatKeys.push(["PercentMovementSpeedMod", ICONS.ms, "Move speed %"]);
+  if (combatVal(side, "ms") || combatVal(otherSide, "ms")
+      || side.msPercent || otherSide.msPercent) {
+    combatKeys.push(["ms", ICONS.ms, "Move speed"]);
+  }
+  // AH only exists on live championStats (you). Always show when you have live.
+  if (side.source === "live" || otherSide.source === "live"
+      || (side.ah || 0) || (otherSide.ah || 0)) {
+    combatKeys.push(["ah", ICONS.ah, "Ability haste"]);
   }
 
   const combat = combatKeys
-    .filter(([k]) => (sideStats[k] || 0) || (otherStats[k] || 0))
+    .filter(([k]) => combatVal(side, k) || combatVal(otherSide, k)
+      || (k === "hp" && side.currentHp != null)
+      || (k === "ah" && side.source === "live"))
     .map(([k, icon, label]) => {
-      const m = sideStats[k] || 0;
-      const t = otherStats[k] || 0;
-      const cls = m === t ? "" : m > t ? "good" : "bad";
-      return statChip(icon, formatStatValue(k, m), `${label} from items`, cls);
+      const m = combatVal(side, k);
+      const t = combatVal(otherSide, k);
+      const cls = !canCompare || m === t ? "" : m > t ? "good" : "bad";
+      return statChip(icon, formatCombatValue(side, k), `${label} · ${srcLabel}`, cls);
     });
 
   return [
@@ -167,6 +186,10 @@ function pickFoe(enemies) {
 }
 
 function buildHtml(mePlayer, foe, enemies, gameTime) {
+  // Display: live totals for you when available; items for the foe.
+  const meCombat = combatProfile(mePlayer);
+  const foeCombat = combatProfile(foe);
+  // Call: item bonuses for both sides so the edge isn't skewed by your base stats.
   const meStats = sumItemStats(mePlayer.items);
   const foeStats = sumItemStats(foe.items);
   const meGold = (mePlayer.items || []).reduce((s, it) => s + itemGold(it.id) * (it.count || 1), 0);
@@ -189,6 +212,9 @@ function buildHtml(mePlayer, foe, enemies, gameTime) {
     callCls = "unfavored";
     note = "They're stronger right now — farm, wait for jungle, or trade short.";
   }
+  if (meCombat.source === "live" && foeCombat.source === "items") {
+    note += " Your chips are live totals; theirs are from items only.";
+  }
 
   const options = enemies.map((e) => {
     const sel = e.riot_id === foe.riot_id ? " selected" : "";
@@ -198,6 +224,7 @@ function buildHtml(mePlayer, foe, enemies, gameTime) {
   }).join("");
 
   const vsLabel = foe.is_lane_opponent ? "vs lane" : `vs ${foe.position || foe.champion}`;
+  const lvl = meCombat.level ? ` · Lv ${meCombat.level}` : "";
 
   return `<div class="card fight-card">
     <div class="fight-toolbar">
@@ -209,8 +236,8 @@ function buildHtml(mePlayer, foe, enemies, gameTime) {
     <div class="fight-head">
       <div class="fight-side">
         <img class="fight-portrait" src="${champIconUrl(mePlayer.champion)}" alt="" />
-        <span class="fight-who">You · ${esc(mePlayer.champion)}</span>
-        <div class="fight-stat-grid">${chipsFor(mePlayer, foe, meStats, foeStats)}</div>
+        <span class="fight-who">You · ${esc(mePlayer.champion)}${lvl}</span>
+        <div class="fight-stat-grid">${chipsFor(mePlayer, foe, meCombat, foeCombat)}</div>
       </div>
       <div class="fight-call ${callCls}">
         <div class="label">${call}</div>
@@ -221,7 +248,7 @@ function buildHtml(mePlayer, foe, enemies, gameTime) {
         <img class="fight-portrait champ-portrait" src="${champIconUrl(foe.champion)}" alt=""
              data-champ-hover="${hoverPayload(foe, { game_time: gameTime })}" />
         <span class="fight-who">${esc(foe.champion)}</span>
-        <div class="fight-stat-grid">${chipsFor(foe, mePlayer, foeStats, meStats)}</div>
+        <div class="fight-stat-grid">${chipsFor(foe, mePlayer, foeCombat, meCombat)}</div>
       </div>
     </div>
     <div class="fight-runes">
@@ -257,6 +284,8 @@ export function renderFight(data, container) {
           scores: data.me.scores,
           items: [],
           runes: null,
+          live_stats: data.me.live_stats || null,
+          level: data.me.level,
           riot_id: "",
           position: data.me.position,
           is_me: true,
@@ -268,6 +297,12 @@ export function renderFight(data, container) {
   if (!mePlayer || !foe) {
     container.innerHTML = "";
     return;
+  }
+
+  // Prefer live_stats from the ally row; fall back to data.me.
+  if (!mePlayer.live_stats && data.me?.live_stats) {
+    mePlayer.live_stats = data.me.live_stats;
+    mePlayer.level = data.me.level;
   }
 
   selectedEnemyId = foe.riot_id || selectedEnemyId;

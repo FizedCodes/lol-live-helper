@@ -28,6 +28,7 @@
       <div id="live" class="hidden">
         <div id="scoreboard" class="card"></div>
         <div id="fight"></div>
+        <div id="postgame-live"></div>
         <div id="teams">
           <details id="ally-panel" open>
             <summary>Your team</summary>
@@ -50,17 +51,20 @@
     <section id="tab-builds" class="tab-page hidden">
       <div class="card">
         <h2>Builds</h2>
-        <p class="muted">META core, suggested buy order with component trees, and situational
-          alternatives. Hover items for build paths; hover champ portraits for tips + item stats.</p>
+        <p class="muted">Live shopping list for your champ — greys what you own, swaps situational
+          counters in as enemies buy, and keeps timed build order optional. Hover items for paths.</p>
         <div id="builds-content"></div>
       </div>
     </section>
 
     <section id="tab-stats" class="tab-page hidden">
       <div class="card">
-        <h2>Win rate tracker</h2>
-        <p class="muted">Your personal win rates from synced match history — ranked, normals, and per champion.</p>
+        <h2>Stats & habits</h2>
+        <p class="muted">Win rates plus habit bubbles from your synced Riot history —
+          weak CS / vision / fight stats light up red so you know what to improve (or ignore).
+          Below: after-match graphs vs your opponent + post-game report. Re-Sync after games to refresh.</p>
         <div id="summary"></div>
+        <div id="postgame-stats"></div>
       </div>
     </section>
 

@@ -42,6 +42,46 @@ def _rune_bits(obj: dict | None) -> dict | None:
     }
 
 
+def _live_stats_of(active: dict) -> dict | None:
+    """Combat totals from activePlayer.championStats (you only — enemies lack this)."""
+    raw = active.get("championStats") or {}
+    if not isinstance(raw, dict) or not raw:
+        return None
+    # Keep the fields the fight/hover UI actually shows (plus a few extras for later).
+    keys = (
+        "abilityHaste",
+        "abilityPower",
+        "armor",
+        "attackDamage",
+        "attackSpeed",
+        "critChance",
+        "currentHealth",
+        "maxHealth",
+        "magicResist",
+        "moveSpeed",
+        "lifeSteal",
+        "physicalLethality",
+        "armorPenetrationFlat",
+        "magicPenetrationFlat",
+        "magicPenetrationPercent",
+        "tenacity",
+    )
+    out = {}
+    for k in keys:
+        v = raw.get(k)
+        if isinstance(v, (int, float)):
+            out[k] = float(v)
+    if active.get("level") is not None:
+        try:
+            out["level"] = int(active["level"])
+        except (TypeError, ValueError):
+            pass
+    gold = active.get("currentGold")
+    if isinstance(gold, (int, float)):
+        out["current_gold"] = float(gold)
+    return out or None
+
+
 def _runes_of(p: dict, *, full: dict | None = None) -> dict | None:
     """Normalize live-client rune payloads into a small frontend-friendly shape.
 
@@ -98,6 +138,7 @@ async def live():
     my_team = me.get("team")
     my_pos = (me.get("position") or "").upper()
     my_full_runes = (active.get("fullRunes") or None)
+    my_live_stats = _live_stats_of(active)
 
     conn = store.connect()
     try:
@@ -118,6 +159,11 @@ async def live():
                 "is_dead": bool(p.get("isDead")),
                 "is_me": p is me,
             }
+            # Live client only exposes full championStats for the active player.
+            if p is me and my_live_stats:
+                entry["live_stats"] = my_live_stats
+                if "level" in my_live_stats:
+                    entry["level"] = my_live_stats["level"]
             if p.get("team") == my_team:
                 team_kills["ally"] += entry["scores"]["kills"]
                 allies.append(entry)
@@ -155,6 +201,8 @@ async def live():
                 "overall": my_overall,       # WR on this champion (all queues)
                 "ranked": ranked_wr,         # personal ranked solo+flex WR
                 "scores": _scores_of(me),
+                "live_stats": my_live_stats,
+                "level": (my_live_stats or {}).get("level"),
             },
             "team_kills": team_kills,
             "enemies": enemies,

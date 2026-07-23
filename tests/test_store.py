@@ -14,11 +14,20 @@ def match_payload(
     win: bool,
     queue_id: int = 420,
     game_creation_ms: int = 1_700_000_000_000,
+    *,
+    kills: int = 5,
+    deaths: int = 3,
+    assists: int = 7,
+    cs: int = 180,
+    vision: int = 18,
+    damage: int = 18_000,
+    duration: int = 1800,
+    position: str = "MIDDLE",
 ) -> dict:
     return {
         "metadata": {"matchId": match_id},
         "info": {
-            "gameDuration": 1800,
+            "gameDuration": duration,
             "queueId": queue_id,
             "gameCreation": game_creation_ms,
             "participants": [
@@ -26,15 +35,46 @@ def match_payload(
                     "puuid": puuid,
                     "championName": my_champ,
                     "teamId": 100,
-                    "teamPosition": "MIDDLE",
+                    "teamPosition": position,
                     "win": win,
+                    "kills": kills,
+                    "deaths": deaths,
+                    "assists": assists,
+                    "totalMinionsKilled": cs,
+                    "neutralMinionsKilled": 0,
+                    "visionScore": vision,
+                    "totalDamageDealtToChampions": damage,
+                    "goldEarned": 12_000,
+                },
+                {
+                    "puuid": "ally",
+                    "championName": "Soraka",
+                    "teamId": 100,
+                    "teamPosition": "UTILITY",
+                    "win": win,
+                    "kills": 1,
+                    "deaths": 4,
+                    "assists": 12,
+                    "totalMinionsKilled": 20,
+                    "neutralMinionsKilled": 0,
+                    "visionScore": 40,
+                    "totalDamageDealtToChampions": 6_000,
+                    "goldEarned": 8_000,
                 },
                 {
                     "puuid": "enemy",
                     "championName": enemy_champ,
                     "teamId": 200,
-                    "teamPosition": "MIDDLE",
+                    "teamPosition": position,
                     "win": not win,
+                    "kills": 4,
+                    "deaths": 5,
+                    "assists": 3,
+                    "totalMinionsKilled": 160,
+                    "neutralMinionsKilled": 0,
+                    "visionScore": 12,
+                    "totalDamageDealtToChampions": 15_000,
+                    "goldEarned": 11_000,
                 },
             ],
         },
@@ -140,6 +180,29 @@ class StoreAccountScopingTests(unittest.TestCase):
             self.assertEqual(store.summary(migrated, "account-b")["matches_synced"], 0)
         finally:
             migrated.close()
+
+    def test_performance_tracker_grades_weak_vision(self) -> None:
+        conn = store.connect()
+        try:
+            # Mid laner with terrible vision vs baseline — should highlight weak.
+            for i in range(5):
+                store.record_match(
+                    conn,
+                    match_payload(
+                        f"P{i}", "a", "Ahri", "Zed", True,
+                        vision=2, cs=200, kills=8, deaths=2, assists=6, damage=22_000,
+                    ),
+                    "a",
+                )
+            perf = store.performance_tracker(conn, "a")
+            self.assertTrue(perf["ready"])
+            self.assertEqual(perf["games"], 5)
+            vision = next(m for m in perf["metrics"] if m["key"] == "vision_per_min")
+            self.assertEqual(vision["grade"], "weak")
+            self.assertTrue(any(m["key"] == "vision_per_min" for m in perf["focus"]))
+            self.assertIn("performance", store.summary(conn, "a"))
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

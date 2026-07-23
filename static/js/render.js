@@ -82,6 +82,8 @@ function hoverPayload(p, ctx) {
       position: p.position,
       scores: p.scores,
       items: p.items,
+      live_stats: p.live_stats || null,
+      level: p.level,
       is_me: !!p.is_me,
       is_dead: !!p.is_dead,
       is_lane_opponent: !!p.is_lane_opponent,
@@ -209,6 +211,7 @@ export function renderSummary(s, container) {
        ${wrCard("Normals / Quickplay", s.normals)}
      </div>
      ${!s.ranked_ready ? `<p class="muted hint">${rankedNote}</p>` : ""}
+     ${renderPerformance(s.performance)}
      <h3>Recently played</h3>
      <p class="muted">Champions from your latest synced games, with your average win rate on each.</p>
      <div class="recent-list">${recent || '<p class="muted">No recent champions yet.</p>'}</div>
@@ -218,6 +221,127 @@ export function renderSummary(s, container) {
        <tr><th>Champion</th><th>Games</th><th>Wins</th><th>Win rate</th></tr>
        ${rows}
      </table>`;
+
+  wirePerfIgnore(container);
+}
+
+const PERF_IGNORE_KEY = "perf.ignored";
+
+function ignoredPerfKeys() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PERF_IGNORE_KEY) || "[]");
+    return new Set(Array.isArray(raw) ? raw : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIgnoredPerfKeys(keys) {
+  localStorage.setItem(PERF_IGNORE_KEY, JSON.stringify([...keys]));
+}
+
+function formatPerfValue(m) {
+  if (m.value == null) return "—";
+  if (m.unit === "%") return `${m.value}%`;
+  if (m.unit === "/m") return `${m.value}${m.unit}`;
+  return String(m.value);
+}
+
+/** Compact habit bubble — value + short label, color-coded grade. */
+function perfBubble(m, { ignorable = true } = {}) {
+  const tip = [
+    m.tip,
+    m.baseline != null ? `Baseline ${m.baseline}${m.unit || ""}` : "",
+  ].filter(Boolean).join(" · ");
+  return `<div class="habit-bubble ${m.grade}" data-perf-key="${m.key}" title="${tip}">
+    <span class="habit-grade">${m.grade}</span>
+    <span class="habit-value">${formatPerfValue(m)}</span>
+    <span class="habit-label">${m.label}</span>
+    ${ignorable
+      ? `<button type="button" class="habit-ignore" data-ignore="${m.key}" title="Ignore this habit" aria-label="Ignore">✕</button>`
+      : ""}
+  </div>`;
+}
+
+function renderPerformance(perf) {
+  if (!perf) {
+    return `<div class="perf-panel">
+      <h3>Habit tracker</h3>
+      <p class="muted">Restart the app server, then hit Sync in Setup to unlock habits.</p>
+    </div>`;
+  }
+  if (!perf.ready) {
+    return `<div class="perf-panel">
+      <h3>Habit tracker</h3>
+      <p class="muted">${perf.note || "Sync match history to unlock CS / vision / fight habits."}</p>
+    </div>`;
+  }
+
+  const ignored = ignoredPerfKeys();
+  const visible = (perf.metrics || []).filter((m) => !ignored.has(m.key));
+  const focus = (perf.focus || []).filter((m) => !ignored.has(m.key));
+  const hiddenN = (perf.metrics || []).length - visible.length;
+
+  const focusBlock = focus.length
+    ? `<div class="perf-focus">
+         <div class="hover-section-label">Focus these</div>
+         <p class="muted">Below soft ${perf.main_role || "role"} baselines — improve or hit ✕ to ignore.</p>
+         <div class="habit-bubbles">${focus.map((m) => perfBubble(m)).join("")}</div>
+       </div>`
+    : `<p class="muted">No weak habits vs your ${perf.main_role || "main"} baseline — nice.</p>`;
+
+  const allBlock = `<div class="habit-bubbles">${visible.map((m) => perfBubble(m)).join("")}</div>`;
+
+  const roleRows = (perf.by_role || []).map((r) => {
+    const weak = (r.weak || []).length
+      ? `<span class="tag loss-tag">${r.weak.length} weak</span>`
+      : `<span class="tag win-tag">solid</span>`;
+    const chips = (r.metrics || [])
+      .filter((m) => !ignored.has(m.key))
+      .map((m) => perfBubble(m, { ignorable: false }))
+      .join("");
+    return `<details class="perf-role">
+      <summary>${r.position} · ${r.games} games ${weak}</summary>
+      <div class="habit-bubbles">${chips}</div>
+    </details>`;
+  }).join("");
+
+  return `<div class="perf-panel">
+    <h3>Habit tracker</h3>
+    <p class="muted">${perf.note || ""}</p>
+    ${focusBlock}
+    <div class="hover-section-label">All habits${hiddenN ? ` · ${hiddenN} ignored` : ""}</div>
+    ${allBlock}
+    ${hiddenN ? `<button type="button" class="ghost" id="perf-reset-ignore">Show ignored habits</button>` : ""}
+    ${roleRows ? `<div class="hover-section-label">By role</div>${roleRows}` : ""}
+  </div>`;
+}
+
+function wirePerfIgnore(container) {
+  container.querySelectorAll("[data-ignore]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const key = btn.getAttribute("data-ignore");
+      if (!key) return;
+      const set = ignoredPerfKeys();
+      set.add(key);
+      saveIgnoredPerfKeys(set);
+      container.querySelectorAll(`[data-perf-key="${key}"]`).forEach((el) => el.remove());
+    });
+  });
+  const reset = container.querySelector("#perf-reset-ignore");
+  if (reset) {
+    reset.addEventListener("click", async () => {
+      localStorage.removeItem(PERF_IGNORE_KEY);
+      try {
+        const { api } = await import("./api.js");
+        renderSummary(await api("/api/stats"), container);
+      } catch {
+        reset.textContent = "Switch away and back to Stats";
+        reset.disabled = true;
+      }
+    });
+  }
 }
 
 function sideBlock(label, player, emptyNote) {
@@ -254,10 +378,13 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
   };
 
   const sm = p.smurf || {};
-  const smurfBlock = `<div class="smurf-card ${sm.likely_smurf ? "flagged" : "ok"}">
+  const severity = sm.severity || (sm.likely_smurf ? "flagged" : "ok");
+  const smurfBlock = `<div class="smurf-card ${severity}">
     <div class="smurf-head">
       <span class="smurf-label">${sm.label || "Account check"}</span>
-      <span class="muted">Lv ${p.summoner_level ?? "?"} · ${sm.ranked_games ?? 0} ranked games</span>
+      <span class="muted">Lv ${p.summoner_level ?? "?"} · ${sm.ranked_games ?? 0} ranked games${
+        sm.score != null ? ` · signal ${sm.score}` : ""
+      }</span>
     </div>
     <p class="muted">${sm.note || ""}</p>
     ${(sm.flags || []).length

@@ -1,8 +1,8 @@
-// Champion hover panel: tip slider + stats from equipped items.
+// Champion hover panel: tip slider + combat stats (live for you, items for others).
 // Any element with data-champ-hover (JSON payload) opens the shared panel.
 
 import {
-  getChampion, sumItemStats, statsLines, itemGold, champIconUrl, itemIconUrl,
+  getChampion, combatProfile, combatLines, itemGold, champIconUrl, itemIconUrl,
 } from "./items.js";
 
 const HEALERS = new Set([
@@ -19,7 +19,9 @@ function tipsFor(player, ctx) {
   const gold = items.reduce((s, it) => s + itemGold(it.id) * (it.count || 1), 0);
 
   if (player.is_me) {
-    tips.push("That's you — hover enemies for fight tips and item-powered stats.");
+    tips.push(player.live_stats
+      ? "That's you — chips use live client totals (including ability haste)."
+      : "That's you — hover enemies for fight tips and item-powered stats.");
   }
   if (player.is_lane_opponent) {
     tips.push("Your direct lane opponent. Track CS and item spikes before all-ining.");
@@ -59,9 +61,10 @@ function tipsFor(player, ctx) {
   return tips;
 }
 
-function combatStatsHtml(items) {
-  const lines = statsLines(sumItemStats(items));
-  if (!lines.length) return '<p class="muted">No item stats yet.</p>';
+function combatStatsHtml(player) {
+  const profile = combatProfile(player);
+  const lines = combatLines(profile);
+  if (!lines.length) return '<p class="muted">No combat stats yet.</p>';
   return `<div class="hover-stats">${lines.map((l) => `<span>${l}</span>`).join("")}</div>`;
 }
 
@@ -128,13 +131,20 @@ export function initChampHover() {
     const gold = (payload.player.items || [])
       .reduce((s, it) => s + itemGold(it.id) * (it.count || 1), 0);
 
+    const profile = combatProfile(payload.player);
+    const statsLabel = profile.source === "live"
+      ? "Live combat stats"
+      : "Stats from items";
+    const lvl = payload.player.level || profile.level;
+
     panel.innerHTML = `
       <div class="hover-head">
         <img src="${champIconUrl(payload.player.champion)}" alt="" />
         <div>
           <div class="hover-name">${payload.player.champion}</div>
           <div class="muted">${payload.player.riot_id || ""}
-            ${payload.player.position ? ` · ${payload.player.position}` : ""}</div>
+            ${payload.player.position ? ` · ${payload.player.position}` : ""}
+            ${lvl ? ` · Lv ${lvl}` : ""}</div>
         </div>
       </div>
       <div class="hover-kda">
@@ -147,8 +157,8 @@ export function initChampHover() {
           `<button type="button" class="tip-dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`
         ).join("")}</div>
       </div>
-      <div class="hover-section-label">Stats from items</div>
-      ${combatStatsHtml(payload.player.items)}
+      <div class="hover-section-label">${statsLabel}</div>
+      ${combatStatsHtml(payload.player)}
       <div class="hover-section-label">Items</div>
       ${itemsHtml(payload.player.items)}
     `;

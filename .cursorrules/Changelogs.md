@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-07-23 01:52 — Stats page fix: habits bubbles + after-match graphs
+- **Bugfix**: running server was missing `GET /api/postgame` (404) and the DB
+  lacked performance columns, so habits never unlocked. Restart migrates the
+  `matches` table; hit **Sync** once to backfill CS/vision/KP stats.
+- **Habits UI**: tracker now shows compact circular **bubbles** (grade + value),
+  weak ones edged red; ignore ✕ still works.
+- **After-match graphs**: post-game report adds bar charts — you vs lane opponent
+  and this game vs your champ average — plus the existing table / item order.
+
+## 2026-07-23 01:40 — Post-game report
+- **Post-game**: `GET /api/postgame` loads your latest synced match + timeline.
+  Shows Win/Loss, weak grades (CS/vision/KP/damage/KDA), you vs lane opponent
+  compare (gold, turrets, KP…), objective chips, final items, and buy order for
+  both players. Also compares this game to your personal champ average.
+- **UI**: report on Live (after the game / last-game view) and on Stats.
+  Sync refreshes it. Tests in `tests/test_postgame.py`.
+
+## 2026-07-23 01:10 — op.gg-style habit tracker (Riot data)
+- **Stats tab**: personal habit tracker grades CS/min, vision/min, kill
+  participation, damage share, and KDA vs soft role baselines. Weak habits are
+  highlighted; ✕ ignores a metric locally. Per-role breakdowns included.
+- **Sync**: Match-V5 rows now store CS, vision, KDA, damage, team totals.
+  Older games upgrade on the next Sync (`perf_ready`). Built from your Riot
+  history — same idea as op.gg tracking, no scraping.
+
+## 2026-07-23 00:20 — Stronger smurf / account-check signals
+- **Player card**: smurf check is now scored across more patterns — high elo on a
+  thin ranked sample, level×tier mismatch, season WR on a small sample, ranked-only
+  hot streaks, games/day grind, OTP / tiny champ pool, inflated KDA, high CS/min.
+  Severity is **ok / worth a glance / possible smurf** (not every soft flag alone).
+- **Tests**: `tests/test_smurf.py` covers normal, Emerald-thin, OTP-hot, and soft
+  low-volume cases.
+
+## 2026-07-22 23:55 — Dynamic builds shopping list + optional order
+- **Builds remake**: tab is now a live **shopping list** — greys owned items,
+  gold-rings components you're building, highlights buy-next, and **swaps**
+  unfinished META slots for situational counters as enemies buy armor/MR/heal
+  (antiheal, pen, defense). Swap notes explain what replaced what.
+- **UX**: your current inventory strip; build order collapsed behind an optional
+  `<details>` (choice remembered); dropped "Mythic" wording; first-back always
+  shows component trees (no empty step). Alternatives section hides items already
+  slotted into the list.
+
+## 2026-07-22 23:45 — Live combat stats + ability haste
+- **Your chips**: fight compare and champ hover now prefer live client
+  `championStats` for you (real AD/AP/Armor/MR/current HP, attack speed,
+  crit, move speed, **ability haste**, level). Enemies stay item-estimated;
+  chip tooltips say which source is in use. Fight call still compares item
+  gold/bonuses so base stats don't skew TAKE THE FIGHT / PLAY SAFE.
+- **Data**: `/api/live` attaches `live_stats` (+ level) on you / `me` from
+  `activePlayer.championStats`.
+
 ## 2026-07-22 22:59 — Fight compare champ swap + rune setups
 - **Fight card**: dropdown to compare vs any enemy (not only laner); selection sticks
   across the 10s live poll. Same card now shows both players' rune setups

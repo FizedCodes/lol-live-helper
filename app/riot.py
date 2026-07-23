@@ -213,3 +213,17 @@ class RiotWebApi:
         _check_key_rejection(resp)
         resp.raise_for_status()
         return resp.json(), "ok"
+
+    async def fetch_timeline(
+        self, client: httpx.AsyncClient, match_id: str, *, retries: int = 2
+    ) -> tuple[dict | None, str]:
+        """Fetch match timeline for item purchase order. Same status codes as fetch_match."""
+        url = f"{self.host}/lol/match/v5/matches/{match_id}/timeline"
+        resp = await self._get(client, url, retries=retries)
+        if resp.status_code == 429:
+            return None, "rate_limited"
+        if resp.status_code == 404:
+            return None, "missing"
+        _check_key_rejection(resp)
+        resp.raise_for_status()
+        return resp.json(), "ok"

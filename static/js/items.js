@@ -97,6 +97,7 @@ const STAT_LABELS = {
   PercentMovementSpeedMod: "MS%",
   FlatHPRegenMod: "HP regen",
   PercentLifeStealMod: "Life steal",
+  AbilityHaste: "AH",
 };
 
 export function formatStatKey(key) {
@@ -133,6 +134,100 @@ export function statsLines(stats) {
   return Object.entries(stats || {})
     .filter(([, v]) => v)
     .map(([k, v]) => `${formatStatValue(k, v)} ${formatStatKey(k)}`);
+}
+
+/**
+ * Unified combat profile for fight/hover chips.
+ * Prefers live client championStats (you only); otherwise item Flat/Percent sums.
+ * Enemies never get live totals from the client API.
+ */
+export function combatProfile(player) {
+  const live = player?.live_stats;
+  if (live && (typeof live.attackDamage === "number" || typeof live.maxHealth === "number")) {
+    return {
+      source: "live",
+      ad: live.attackDamage || 0,
+      ap: live.abilityPower || 0,
+      armor: live.armor || 0,
+      mr: live.magicResist || 0,
+      hp: live.maxHealth || 0,
+      currentHp: live.currentHealth,
+      as: live.attackSpeed || 0,
+      asKind: "rate", // attacks per second
+      crit: live.critChance || 0, // 0–1
+      ms: live.moveSpeed || 0,
+      ah: live.abilityHaste || 0,
+      level: live.level,
+    };
+  }
+  const items = sumItemStats(player?.items);
+  const asPercent = items.PercentAttackSpeedMod || 0;
+  const asFlat = items.FlatAttackSpeedMod || 0;
+  return {
+    source: "items",
+    ad: items.FlatPhysicalDamageMod || 0,
+    ap: items.FlatMagicDamageMod || 0,
+    armor: items.FlatArmorMod || 0,
+    mr: items.FlatSpellBlockMod || 0,
+    hp: items.FlatHPPoolMod || 0,
+    currentHp: null,
+    as: asPercent || asFlat,
+    asKind: asPercent ? "percent" : "flat",
+    crit: items.FlatCritChanceMod || 0,
+    ms: items.FlatMovementSpeedMod || 0,
+    msPercent: items.PercentMovementSpeedMod || 0,
+    ah: 0, // Data Dragon item.stats rarely exposes FlatAbilityHaste
+    level: player?.level,
+  };
+}
+
+/** Format a combatProfile field for chip / hover display. */
+export function formatCombatValue(profile, key) {
+  if (!profile) return "0";
+  if (key === "hp" && profile.source === "live" && profile.currentHp != null) {
+    return `${Math.round(profile.currentHp)}/${Math.round(profile.hp)}`;
+  }
+  if (key === "as") {
+    if (profile.asKind === "rate") {
+      return `${Math.round((profile.as || 0) * 100) / 100}`;
+    }
+    if (profile.asKind === "percent" || (profile.as || 0) < 3) {
+      return `${Math.round((profile.as || 0) * 1000) / 10}%`;
+    }
+    return String(Math.round(profile.as || 0));
+  }
+  if (key === "crit") {
+    return `${Math.round((profile.crit || 0) * 1000) / 10}%`;
+  }
+  if (key === "ms" && profile.source === "items" && !profile.ms && profile.msPercent) {
+    return `${Math.round(profile.msPercent * 1000) / 10}%`;
+  }
+  return String(Math.round(profile[key] || 0));
+}
+
+/** Short lines for the hover panel from a combatProfile. */
+export function combatLines(profile) {
+  if (!profile) return [];
+  const rows = [
+    ["ad", "AD"],
+    ["ap", "AP"],
+    ["armor", "Armor"],
+    ["mr", "MR"],
+    ["hp", "HP"],
+    ["as", "AS"],
+    ["crit", "Crit"],
+    ["ms", "MS"],
+    ["ah", "AH"],
+  ];
+  return rows
+    .filter(([k]) => {
+      if (k === "ms" && profile.source === "items") {
+        return (profile.ms || 0) || (profile.msPercent || 0);
+      }
+      if (k === "ah") return profile.source === "live" || (profile.ah || 0);
+      return (profile[k] || 0) || (k === "hp" && profile.currentHp);
+    })
+    .map(([k, label]) => `${formatCombatValue(profile, k)} ${label}`);
 }
 
 // Data Dragon square icons use champion "id" keys; the live client gives

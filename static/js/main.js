@@ -3,6 +3,7 @@ import { api, post } from "./api.js";
 import { renderLive, renderSummary, renderPlayerCard, timeAgo } from "./render.js";
 import { renderBuilds } from "./builds.js";
 import { renderFight } from "./fight.js";
+import { renderPostgame } from "./postgame.js";
 import { ready as ddReady, initItemTooltips } from "./items.js";
 import { initChampHover } from "./hover.js";
 
@@ -20,6 +21,10 @@ const liveEls = {
 const TABS = ["live", "builds", "stats", "player", "setup"];
 let lastLiveData = null; // latest payload with teams in it (live game or last-game snapshot)
 let lastPlayerLookup = null; // cached /api/player payload so polls only refresh items
+let lastPostgame = null;
+let lastPostgameId = null;
+let postgameInflight = null;
+let actuallyInGame = false; // last_game snapshots also have in_game:true — don't trust that alone
 
 function currentTab() {
   const t = location.hash.replace("#", "");
@@ -33,7 +38,11 @@ function showTab() {
     document.querySelector(`.tabs a[data-tab="${t}"]`).classList.toggle("active", t === tab);
   }
   if (tab === "builds") renderBuilds(lastLiveData, $("builds-content"));
-  if (tab === "stats") loadSummary();
+  if (tab === "stats") {
+    loadSummary();
+    loadPostgame();
+  }
+  if (tab === "live" && !actuallyInGame) loadPostgame();
 }
 window.addEventListener("hashchange", showTab);
 
@@ -112,6 +121,7 @@ $("sync-btn").addEventListener("click", async () => {
     const r = await api("/api/sync", { method: "POST" });
     $("sync-status").textContent = `Done: ${r.stored} new matches stored (${r.total_known} total).`;
     loadSummary();
+    loadPostgame(true);
   } catch (e) {
     $("setup-error").textContent = e.message;
     $("sync-status").textContent = "";
@@ -124,6 +134,59 @@ async function loadSummary() {
   try {
     renderSummary(await api("/api/stats"), $("summary"));
   } catch { /* non-critical */ }
+}
+
+function paintPostgame(data) {
+  const liveBox = $("postgame-live");
+  const statsBox = $("postgame-stats");
+  if (statsBox) renderPostgame(data, statsBox);
+  // On Live, only show when reviewing last game / idle — not mid-match.
+  if (liveBox) {
+    if (actuallyInGame) {
+      liveBox.innerHTML = "";
+    } else {
+      renderPostgame(data, liveBox);
+    }
+  }
+}
+
+async function loadPostgame(force = false) {
+  if (postgameInflight) return postgameInflight;
+  postgameInflight = (async () => {
+    try {
+      if (!force && lastPostgame && lastPostgame.ready) {
+        paintPostgame(lastPostgame);
+        return;
+      }
+      const liveBox = $("postgame-live");
+      const statsBox = $("postgame-stats");
+      const loading = { ready: false, note: "Loading post-game report…" };
+      if (statsBox && (!lastPostgame || force)) renderPostgame(loading, statsBox);
+      if (liveBox && !actuallyInGame && (!lastPostgame || force)) renderPostgame(loading, liveBox);
+
+      const data = await api("/api/postgame");
+      if (data?.match_id && data.match_id === lastPostgameId && lastPostgame?.ready && !force) {
+        paintPostgame(lastPostgame);
+        return;
+      }
+      lastPostgame = data;
+      lastPostgameId = data?.match_id || null;
+      paintPostgame(data);
+    } catch (e) {
+      const msg = e.message || "Could not load post-game.";
+      const err = {
+        ready: false,
+        note: msg.includes("Not Found")
+          ? "Post-game API missing — restart the local server, then refresh."
+          : msg,
+      };
+      lastPostgame = err;
+      paintPostgame(err);
+    } finally {
+      postgameInflight = null;
+    }
+  })();
+  return postgameInflight;
 }
 
 // --- Player lookup (one-click + search) ----------------------------------
@@ -199,6 +262,7 @@ async function poll() {
     const pill = $("status-pill");
     const banner = $("live-banner");
     if (data.in_game && data.me) {
+      actuallyInGame = true;
       pill.textContent = "In game";
       pill.className = "pill ingame";
       banner.classList.add("hidden");
@@ -207,7 +271,9 @@ async function poll() {
       lastLiveData = data;
       renderLive(data, liveEls);
       renderFight(data, liveEls.fight);
+      if ($("postgame-live")) $("postgame-live").innerHTML = "";
     } else {
+      actuallyInGame = false;
       pill.textContent = "Not in game";
       pill.className = "pill idle";
       $("idle").classList.remove("hidden");
@@ -226,6 +292,8 @@ async function poll() {
         $("live").classList.add("hidden");
         if (liveEls.fight) liveEls.fight.innerHTML = "";
       }
+      // Post-game uses the latest *synced* match (may need a Sync after the game).
+      loadPostgame();
     }
     if (currentTab() === "builds") renderBuilds(lastLiveData, $("builds-content"));
     // Refresh you-vs-them items on the Player tab without re-hitting Riot.
@@ -240,6 +308,7 @@ initChampHover();
 showTab();
 loadConfig();
 loadSummary();
+loadPostgame();
 refreshKeyPill();
 setInterval(refreshKeyPill, 5 * 60 * 1000);
 poll();

@@ -7,18 +7,23 @@ Browser (static/js/main.js, polls /api/live every 10s)
    ▼
 FastAPI (app/main.py — wiring only, ~40 lines)
    ├── routes_live.py    GET /api/live: live client data + matchup stats + verdicts + ranks + items
+   │                     + activePlayer.championStats as live_stats (you only) + runes
    ├── routes_sync.py    POST /api/sync (match history pull), GET /api/stats
-   ├── routes_player.py  GET /api/player?riot_id=: ranks, smurf signals, recent matches
+   ├── routes_player.py  GET /api/player?riot_id=: ranks, scored smurf signals
+   │                     (tier×volume, OTP, grind, ranked WR, KDA/CS), recent matches
+   ├── routes_postgame.py GET /api/postgame: latest match grades, laner compare,
+   │                     objectives, items + timeline buy order
    └── routes_config.py  GET/POST /api/config (Riot ID), POST /api/key, GET /api/key/status
         │
         ├── riot.py      HTTP clients: fetch_live_game() → https://127.0.0.1:2999 (self-signed cert,
         │                verify=False, returns None when not in game); RiotWebApi → Account-V1,
         │                Match-V5 (regional host), League-V4 (platform host); validate_key()
         │                All Riot web GETs go through rate_limit.py (shared 18/1s + 90/2min).
+        ├── postgame.py  build_report() from Match-V5 (+ optional timeline)
         ├── rate_limit.py Sliding-window limiter shared by every RiotWebApi request
-        ├── store.py     SQLite (data/helper.db): meta + matchups + matches (queue/time);
-        │                matchup_stats(), champ_overall(), queue_win_rate(), summary(),
-        │                record_match()
+        ├── store.py     SQLite (data/helper.db): meta + matchups + matches (queue/time +
+        │                perf: CS/vision/KDA/damage); matchup_stats(), champ_overall(),
+        │                queue_win_rate(), summary() + performance_tracker(), record_match()
         ├── analysis.py  verdict(): thresholds MIN_GAMES_FOR_VERDICT=3, favored ≥55% WR, unfavored ≤45%
         ├── ranks.py     fetch_ranks(): Riot ID → puuid → league entries; module-level cache
         │                (ranks don't change mid-game); failures return None, never break /api/live
@@ -36,15 +41,21 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   once per load (`ready` promise; pinned-version fallback). Exports icon URL helpers,
   `getItem()`/`getChampion()`, and `initItemTooltips()` (one shared hover tooltip; any element
   with `data-item-id` gets it — name, gold, stripped description).
-- `js/builds.js` — META core, timed build order with component trees, situational
-  alternatives. ↑ badges mark items that build into others.
+- `js/builds.js` — Live shopping list from META core: inventory sync, situational
+  swaps as enemies buy, optional timed build order (`<details>` + localStorage),
+  situational alternatives for leftovers.
 - `js/fight.js` — Live fight compare card: enemy dropdown, item-powered call,
-  side-by-side rune setups (Data Dragon icons).
-- `js/hover.js` — champion hover panel: tip slider animation + stats from equipped items.
+  side-by-side rune setups (Data Dragon icons). Your chips use live
+  `championStats` (incl. AH); enemies use item estimates.
+- `js/hover.js` — champion hover panel: tip slider animation + stats from live
+  client (you) or equipped items (others).
+- `js/postgame.js` — After-match report: grades, laner compare, buy order.
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
 - `style.css` — dark LoL-ish theme, CSS vars at top; fight compare, champ hover, order steps.
 - Live: fight-compare card (you vs laner); clickable Riot IDs open player lookup card.
-- Stats: Riot ID search box hitting `/api/player`.
+  Post-game report appears when not in game (after Sync).
+- Player: Riot ID search box hitting `/api/player`.
+- Stats: win rates + habit **bubbles** + post-game report with after-match bar graphs.
 
 ## Important mechanics
 - **Active player identification**: live client's `activePlayer.riotId` matched against `allPlayers`.

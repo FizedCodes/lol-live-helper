@@ -31,6 +31,23 @@ QUEUE_LABELS = {
     1700: "Arena",
 }
 
+RANKED_QUEUE_IDS = {420, 440}
+SR_QUEUE_IDS = {400, 420, 430, 440, 490}
+
+# Rough ladder height for "high elo on a thin account" combos.
+_TIER_HEIGHT = {
+    "IRON": 0,
+    "BRONZE": 1,
+    "SILVER": 2,
+    "GOLD": 3,
+    "PLATINUM": 4,
+    "EMERALD": 5,
+    "DIAMOND": 6,
+    "MASTER": 7,
+    "GRANDMASTER": 8,
+    "CHALLENGER": 9,
+}
+
 
 def _entry_summary(entry: dict | None, queue_label: str) -> dict | None:
     if not entry:
@@ -50,40 +67,186 @@ def _entry_summary(entry: dict | None, queue_label: str) -> dict | None:
     }
 
 
-def _smurf_signal(level: int | None, ranked_games: int, recent: list[dict]) -> dict:
-    """Heuristic flags — not proof, just signals worth noticing."""
-    flags = []
+def _best_tier(solo: dict | None, flex: dict | None) -> tuple[str | None, int]:
+    """Return (tier_name, height) for the higher of solo/flex."""
+    best_tier, best_h = None, -1
+    for entry in (solo, flex):
+        if not entry or not entry.get("tier"):
+            continue
+        tier = str(entry["tier"]).upper()
+        h = _TIER_HEIGHT.get(tier, -1)
+        if h > best_h:
+            best_tier, best_h = tier, h
+    return best_tier, best_h
+
+
+def _kda(m: dict) -> float:
+    return (int(m.get("kills") or 0) + int(m.get("assists") or 0)) / max(1, int(m.get("deaths") or 0))
+
+
+def _cs_per_min(m: dict) -> float | None:
+    dur = int(m.get("duration") or 0)
+    if dur < 300:
+        return None
+    return float(m.get("cs") or 0) / (dur / 60.0)
+
+
+def _smurf_signal(
+    level: int | None,
+    ranked_games: int,
+    recent: list[dict],
+    solo: dict | None = None,
+    flex: dict | None = None,
+) -> dict:
+    """Heuristic flags — not proof. Score weights so one soft flag alone rarely alarms."""
+    flags: list[str] = []
+    score = 0
+    tier, tier_h = _best_tier(solo, flex)
+    decided = [m for m in recent if m.get("win") is not None]
+    ranked_recent = [m for m in decided if m.get("queue_id") in RANKED_QUEUE_IDS]
+    sr_recent = [m for m in decided if m.get("queue_id") in SR_QUEUE_IDS]
+
+    # --- Account freshness / ladder mismatch ---------------------------------
     if level is not None and level <= 40:
         flags.append(f"Summoner level {level} (low for a long-time account)")
-    if ranked_games and ranked_games < 50:
-        flags.append(f"Only {ranked_games} ranked games on record this season")
+        score += 2
+    elif level is not None and level <= 55 and ranked_games < 80:
+        flags.append(f"Level {level} with only {ranked_games} ranked games — still a young ladder account")
+        score += 1
+
     if ranked_games == 0 and level is not None and level >= 30:
         flags.append("Level 30+ but no ranked games this season")
+        score += 1
+    elif ranked_games and ranked_games < 50:
+        # Soft alone — strong when paired with high elo or low level.
+        flags.append(f"Only {ranked_games} ranked games on record this season")
+        score += 1
 
-    # High win rate on a tiny recent sample can look smurfy / boosted.
-    decided = [m for m in recent if m.get("win") is not None]
+    if tier_h >= 5 and ranked_games < 60:  # Emerald+
+        flags.append(
+            f"{tier.title()} with only {ranked_games} ranked games — classic smurf / bought-boost ladder shape"
+        )
+        score += 3
+    elif tier_h >= 6 and ranked_games < 100:  # Diamond+
+        flags.append(f"{tier.title()} on a thin ranked sample ({ranked_games} games)")
+        score += 2
+    elif tier_h >= 4 and level is not None and level <= 45:  # Plat+ on low level
+        flags.append(f"{tier.title()} at summoner level {level}")
+        score += 3
+    elif tier_h >= 3 and level is not None and level <= 35:  # Gold+ very fresh
+        flags.append(f"{tier.title()} at summoner level {level}")
+        score += 2
+
+    # Season WR vs sample size (League entry wins/losses).
+    for label, entry in (("Solo", solo), ("Flex", flex)):
+        if not entry or not entry.get("games") or entry["games"] < 15:
+            continue
+        wr = entry.get("win_rate")
+        if wr is not None and wr >= 65 and entry["games"] <= 60:
+            flags.append(f"{wr:.0f}% {label} win rate over only {entry['games']} games")
+            score += 2
+        elif wr is not None and wr >= 70 and entry["games"] <= 100:
+            flags.append(f"{wr:.0f}% {label} win rate over {entry['games']} games")
+            score += 1
+
+    # --- Recent activity patterns --------------------------------------------
     if len(decided) >= 5:
         wins = sum(1 for m in decided if m["win"])
         wr = 100.0 * wins / len(decided)
-        if wr >= 70:
+        if wr >= 75:
             flags.append(f"{wr:.0f}% win rate across last {len(decided)} games")
+            score += 2
+        elif wr >= 70:
+            flags.append(f"{wr:.0f}% win rate across last {len(decided)} games")
+            score += 1
 
-    if not flags:
-        return {
-            "level": level,
-            "ranked_games": ranked_games,
-            "likely_smurf": False,
-            "label": "Looks normal",
-            "note": "No strong smurf signals from level / ranked volume / recent WR.",
-            "flags": [],
-        }
+    if len(ranked_recent) >= 6:
+        rw = sum(1 for m in ranked_recent if m["win"])
+        rwr = 100.0 * rw / len(ranked_recent)
+        if rwr >= 75:
+            flags.append(f"{rwr:.0f}% ranked win rate in last {len(ranked_recent)} ranked games")
+            score += 2
+
+    # Games-per-day over the span of the recent sample (smurf grind).
+    stamps = sorted(int(m["played_at"]) for m in decided if m.get("played_at"))
+    if len(stamps) >= 8:
+        span_days = max((stamps[-1] - stamps[0]) / 86400.0, 0.5)
+        gpd = len(stamps) / span_days
+        if gpd >= 10:
+            flags.append(f"Heavy grind — ~{gpd:.1f} games/day over the last {span_days:.1f} days")
+            score += 2
+        elif gpd >= 7:
+            flags.append(f"High play volume — ~{gpd:.1f} games/day recently")
+            score += 1
+
+    # One-trick / tiny champ pool (smurfs often OTP).
+    champs = [m.get("champion") for m in decided if m.get("champion")]
+    if len(champs) >= 8:
+        counts: dict[str, int] = {}
+        for c in champs:
+            counts[c] = counts.get(c, 0) + 1
+        top_champ, top_n = max(counts.items(), key=lambda kv: kv[1])
+        share = 100.0 * top_n / len(champs)
+        unique = len(counts)
+        if share >= 70:
+            flags.append(f"OTP pattern — {top_champ} in {top_n}/{len(champs)} recent games ({share:.0f}%)")
+            score += 2
+        elif unique <= 3 and len(champs) >= 10:
+            flags.append(f"Tiny champ pool — only {unique} champs in last {len(champs)} games")
+            score += 1
+
+    # Inflated KDA / CS (stomping below their real level).
+    if len(decided) >= 8:
+        avg_kda = sum(_kda(m) for m in decided) / len(decided)
+        if avg_kda >= 5.5:
+            flags.append(f"Inflated KDA — {avg_kda:.1f} average across last {len(decided)} games")
+            score += 2
+        elif avg_kda >= 4.5:
+            flags.append(f"High KDA — {avg_kda:.1f} average across last {len(decided)} games")
+            score += 1
+
+    cs_samples = [_cs_per_min(m) for m in sr_recent]
+    cs_samples = [x for x in cs_samples if x is not None]
+    if len(cs_samples) >= 6:
+        avg_cs = sum(cs_samples) / len(cs_samples)
+        if avg_cs >= 8.5:
+            flags.append(f"Very high CS pace — {avg_cs:.1f} CS/min in recent SR games")
+            score += 1
+
+    # Deduplicate flags while preserving order.
+    seen: set[str] = set()
+    uniq_flags = []
+    for f in flags:
+        if f not in seen:
+            seen.add(f)
+            uniq_flags.append(f)
+
+    if score >= 4:
+        severity = "flagged"
+        likely = True
+        label = "Possible smurf / new account"
+        note = "Several soft signals line up — treat as a heads-up, not proof."
+    elif score >= 2:
+        severity = "watch"
+        likely = True
+        label = "Worth a glance"
+        note = "A couple of smurf-ish patterns — maybe skilled, maybe a second account."
+    else:
+        severity = "ok"
+        likely = False
+        label = "Looks normal"
+        note = "No strong smurf signals from level, ladder volume, or recent play patterns."
+
     return {
         "level": level,
         "ranked_games": ranked_games,
-        "likely_smurf": True,
-        "label": "Possible smurf / new account",
-        "note": "These are soft signals only — high rank on a fresh account is the classic pattern.",
-        "flags": flags,
+        "tier": tier,
+        "score": score,
+        "severity": severity,
+        "likely_smurf": likely,
+        "label": label,
+        "note": note,
+        "flags": uniq_flags,
     }
 
 
@@ -138,6 +301,7 @@ async def _recent_matches(
             "deaths": me.get("deaths", 0),
             "assists": me.get("assists", 0),
             "cs": (me.get("totalMinionsKilled") or 0) + (me.get("neutralMinionsKilled") or 0),
+            "damage": me.get("totalDamageDealtToChampions") or 0,
             "queue_id": queue_id,
             "queue": QUEUE_LABELS.get(queue_id, f"Queue {queue_id}"),
             "duration": info.get("gameDuration", 0),
@@ -225,7 +389,7 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
         "solo": summary_solo,
         "flex": summary_flex,
         "summoner_level": level,
-        "smurf": _smurf_signal(level, ranked_games, recent),
+        "smurf": _smurf_signal(level, ranked_games, recent, summary_solo, summary_flex),
         "recent_matches": recent,
         "matches_warning": warning,
     }
