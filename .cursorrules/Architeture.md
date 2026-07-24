@@ -11,8 +11,8 @@ FastAPI (app/main.py — wiring only, ~40 lines)
    ├── routes_sync.py    POST /api/sync (match history pull), GET /api/stats
    ├── routes_player.py  GET /api/player?riot_id=: ranks, scored smurf signals
    │                     (tier×volume, OTP, grind, ranked WR, KDA/CS), recent matches
-   ├── routes_postgame.py GET /api/postgame: latest match grades, laner compare,
-   │                     objectives, items + timeline buy order
+   ├── routes_postgame.py GET /api/postgame/list + /api/postgame?match_id=
+   │                     (saved reports / match+timeline cache before Riot)
    └── routes_config.py  GET/POST /api/config (Riot ID), POST /api/key, GET /api/key/status
         │
         ├── riot.py      HTTP clients: fetch_live_game() → https://127.0.0.1:2999 (self-signed cert,
@@ -31,9 +31,10 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 ```
 
 ## Frontend (static/)
-- `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Player / Setup) + pills
-  (key status, in-game status). Each tab is a `.tab-page` section; hash router in main.js
-  shows one at a time (`#live`, `#builds`, `#stats`, `#player`, `#setup`).
+- `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Postgame /
+  Player / Setup) + pills (key status, in-game status). Each tab is a `.tab-page`
+  section; hash router in main.js shows one at a time (`#live`, `#builds`, `#stats`,
+  `#postgame`, `#player`, `#setup`).
 - `js/main.js` — entry point: tab router, event wiring, 10s live poll, 5min key-status poll.
   Keeps `lastLiveData` (live payload or last-game snapshot) for the Builds tab.
 - `js/render.js` — pure HTML-string builders (playerRow, renderLive, renderSummary…).
@@ -49,20 +50,23 @@ FastAPI (app/main.py — wiring only, ~40 lines)
   `championStats` (incl. AH); enemies use item estimates.
 - `js/hover.js` — champion hover panel: tip slider animation + stats from live
   client (you) or equipped items (others).
-- `js/postgame.js` — After-match report: grades, laner compare, buy order.
+- `js/postgame.js` — Postgame tab: synced game history list + full report
+  (grades, graphs, buy order). Reports persist in SQLite.
 - `js/api.js` — fetch wrapper (`api()`, `post()`); throws Error with backend `detail` message.
 - `style.css` — dark LoL-ish theme, CSS vars at top; fight compare, champ hover, order steps.
 - Live: fight-compare card (you vs laner); clickable Riot IDs open player lookup card.
-  Post-game report appears when not in game (after Sync).
+  After a game, open **Postgame** (Sync first).
 - Player: Riot ID search box hitting `/api/player`.
-- Stats: win rates + habit **bubbles** + post-game report with after-match bar graphs.
+- Stats: win rates + habit **bubbles** (detailed after-match reports are under Postgame).
 
 ## Important mechanics
 - **Active player identification**: live client's `activePlayer.riotId` matched against `allPlayers`.
 - **Lane opponent**: enemy with same `position` as user; sorted first, gold highlight.
-- **Player recent matches**: `/api/player` pulls Match-V5 ids (14-day window, up to 20),
-  retries on 429, skips 404 match files, sorts by start time. Live rank fetches are
-  concurrency-limited so they don't starve match lookups on the shared dev key.
+- **Player recent matches**: `/api/player` indexes newest **70** match IDs, loads
+  **20** details per page (Load more for the next page). Finished Match-V5 JSON
+  lives in SQLite `match_cache` (shared with Sync). In-memory player lookup
+  memory (~5 min) skips re-fetching ranks + id list on re-search. Stream with
+  `?stream=1&start=&count=`.
 - **Last game replay**: every in-game poll snapshots the full `/api/live` payload to meta key
   `last_game` (JSON with `saved_at`). When not in game, that snapshot is returned and rendered
   with a "LAST GAME" banner; win/loss comes from the live client's `GameEnd` event when caught.

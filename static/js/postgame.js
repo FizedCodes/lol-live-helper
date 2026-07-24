@@ -196,11 +196,14 @@ export function renderPostgame(data, container) {
   const foe = data.opponent;
   const resultCls = data.result === "Win" ? "good" : "bad";
   const focus = (data.focus || []).map(gradeChip).join("");
+  const cacheNote = data.from_cache
+    ? `<span class="muted cache-pill" title="Loaded from local saved report">saved</span>`
+    : "";
 
   container.innerHTML = `<div class="pg-card">
     <div class="pg-head">
       <div>
-        <h3>Post-game · <span class="${resultCls}">${esc(data.result)}</span></h3>
+        <h3>Post-game · <span class="${resultCls}">${esc(data.result)}</span> ${cacheNote}</h3>
         <p class="muted">${esc(data.queue)} · ${gameClock(data.duration)}
           · ${esc(me?.champion || "")}${me?.position ? ` ${esc(me.position)}` : ""}</p>
       </div>
@@ -223,4 +226,58 @@ export function renderPostgame(data, container) {
       })}
     </div>
   </div>`;
+}
+
+function timeAgo(ts) {
+  if (!ts) return "";
+  const sec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+/**
+ * History strip for the Postgame tab.
+ * @param {{ games?: array } | null} data
+ * @param {HTMLElement | null} container
+ * @param {string | null} activeId
+ */
+export function renderPostgameList(data, container, activeId = null) {
+  if (!container) return;
+  const games = data?.games || [];
+  if (!games.length) {
+    container.innerHTML = `<p class="muted">${esc(
+      data?.note || "No synced games yet. Hit Sync in Setup after you play.",
+    )}</p>`;
+    return;
+  }
+
+  container.innerHTML = `<div class="hover-section-label">Your games (${games.length})</div>
+    <div class="pg-history-list">
+      ${games.map((g) => {
+        const active = g.match_id === activeId ? "active" : "";
+        const result = g.win ? "WIN" : "LOSS";
+        const resultCls = g.win ? "win-tag" : "loss-tag";
+        const saved = g.has_report_cache
+          ? '<span class="muted cache-pill">saved</span>'
+          : "";
+        return `<button type="button" class="pg-history-row ${active}"
+                  data-match-id="${esc(g.match_id)}">
+          <img src="${champIconUrl(g.champion)}" alt=""
+               onerror="this.style.visibility='hidden'" />
+          <div class="match-main">
+            <div class="name">${esc(g.champion)}
+              <span class="tag ${resultCls}">${result}</span> ${saved}
+            </div>
+            <div class="sub">${esc(g.queue)}${g.position ? ` · ${esc(g.position)}` : ""}
+              ${g.played_at ? ` · ${timeAgo(g.played_at)}` : ""}</div>
+          </div>
+          <div class="match-score">
+            <span class="kda"><b>${g.kills}</b>/<span class="d">${g.deaths}</span>/${g.assists}</span>
+            <span class="muted">${g.cs} cs · ${gameClock(g.duration_s)}</span>
+          </div>
+        </button>`;
+      }).join("")}
+    </div>`;
 }

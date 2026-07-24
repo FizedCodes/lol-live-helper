@@ -204,6 +204,21 @@ class StoreAccountScopingTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_match_cache_roundtrip(self):
+        conn = store.connect()
+        try:
+            payload = {"metadata": {"matchId": "CACHE1"}, "info": {"queueId": 420}}
+            store.put_match_payload(conn, "CACHE1", payload)
+            got = store.get_match_payload(conn, "CACHE1")
+            self.assertEqual(got["metadata"]["matchId"], "CACHE1")
+            # Second put must not explode / overwrite carelessly
+            store.put_match_payload(conn, "CACHE1", {"metadata": {"matchId": "CACHE1"}, "info": {}})
+            self.assertEqual(store.get_match_payload(conn, "CACHE1")["info"]["queueId"], 420)
+        finally:
+            conn.execute("DELETE FROM match_cache WHERE match_id = ?", ("CACHE1",))
+            conn.commit()
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

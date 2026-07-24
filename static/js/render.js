@@ -96,8 +96,7 @@ function hoverPayload(p, ctx) {
 function playerRow(p, meChamp, ctx) {
   const isEnemy = !!p.verdict;
   const stats = isEnemy
-    ? `<div class="sub">vs them: ${wrSpan(p.stats.vs_as_laner || p.stats.vs_any)} ·
-       on ${meChamp}: ${wrSpan(p.stats.on_my_champ)}</div>`
+    ? `<span class="matchup-wr">vs ${wrSpan(p.stats.vs_as_laner || p.stats.vs_any)} · on ${meChamp}: ${wrSpan(p.stats.on_my_champ)}</span>`
     : "";
   const verdict = isEnemy
     ? `<div class="verdict ${p.verdict.call}" title="${p.verdict.note}">
@@ -107,20 +106,24 @@ function playerRow(p, meChamp, ctx) {
   const nameBtn = p.riot_id
     ? `<button type="button" class="player-link" data-riot-id="${encodeURIComponent(p.riot_id)}">${p.riot_id}</button>`
     : "";
+  const metaBits = [
+    p.is_lane_opponent ? '<span class="tag">YOUR LANE</span>' : "",
+    p.position ? `<span class="tag dim">${p.position}</span>` : "",
+    rankSpan(p.rank),
+  ].filter(Boolean).join(" ");
   return `<div class="player-row ${p.is_lane_opponent ? "laner" : ""} ${p.is_dead ? "dead" : ""}">
     <img class="champ-portrait" src="${champIcon(p.champion)}" alt=""
          data-champ-hover="${hoverPayload(p, ctx)}"
          onerror="this.style.visibility='hidden'" />
     <div class="info">
-      <div class="name">${p.is_me ? "You — " : ""}${p.champion}
-        ${p.is_lane_opponent ? '<span class="tag">YOUR LANE</span>' : ""}
-        ${p.position ? `<span class="tag">${p.position}</span>` : ""}</div>
-      <div class="sub player-name">${nameBtn}</div>
-      <div class="sub">${rankSpan(p.rank)}</div>
-      ${stats}
+      <div class="name-line">
+        <span class="name">${p.is_me ? "You — " : ""}${p.champion}</span>
+        ${metaBits}
+      </div>
+      <div class="sub player-name">${nameBtn}${stats ? ` · ${stats}` : ""}</div>
       ${itemsRow(p.items)}
     </div>
-    ${kdaSpan(p.scores)}
+    <div class="scores">${kdaSpan(p.scores)}</div>
     ${verdict}
   </div>`;
 }
@@ -136,19 +139,19 @@ export function renderLive(data, els) {
   els.scoreboard.innerHTML =
     `<div class="score-row">
        <div class="score ${lead}">
-         <span class="side-label">YOUR TEAM</span>
+         <span class="side-label">US</span>
          <span class="big">${tk.ally}</span>
-         <span class="vs">—</span>
+         <span class="vs">:</span>
          <span class="big">${tk.enemy}</span>
-         <span class="side-label">ENEMY</span>
+         <span class="side-label">THEM</span>
        </div>
-       <div class="clock">${gameClock(data.game_time)}</div>
+       <div class="clock" title="Game time">${gameClock(data.game_time)}</div>
        <div class="me-brief">
          <img class="champ-portrait" src="${champIcon(me.champion)}" alt=""
               data-champ-hover="${hoverPayload(mePlayer, ctx)}"
               onerror="this.style.visibility='hidden'" />
          <div>
-           <div class="name">${me.champion}${me.position ? ` <span class="tag">${me.position}</span>` : ""}</div>
+           <div class="name">${me.champion}${me.position ? ` <span class="tag dim">${me.position}</span>` : ""}</div>
            <div class="sub">${kdaSpan(me.scores)}</div>
            <div class="wr-strip">
              <span class="wr-chip" title="Your ranked solo + flex win rate">
@@ -158,13 +161,13 @@ export function renderLive(data, els) {
                ${me.champion} ${wrPct(me.overall)}
                <span class="muted">${me.overall ? `(${me.overall.games}g)` : ""}</span>
              </span>
-             <a class="wr-more" href="#stats">Full stats →</a>
+             <a class="wr-more" href="#stats">Stats →</a>
            </div>
          </div>
        </div>
      </div>`;
 
-  // Fight compare + runes live in fight.js (wired from main.js).
+  // Fight compare + runes live in fight.js; camps in camps.js (wired from main.js).
   els.enemies.innerHTML = data.enemies.map((e) => playerRow(e, me.champion, ctx)).join("");
   els.allies.innerHTML = data.allies.map((a) => playerRow(a, me.champion, ctx)).join("");
 }
@@ -410,10 +413,23 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
   const warn = p.matches_warning
     ? `<p class="error matches-warning">${p.matches_warning}</p>`
     : "";
+  const n = (p.recent_matches || []).length;
+  const total = p.match_ids_total || n;
+  const more = p.has_more
+    ? `<button type="button" id="player-load-more" class="ghost load-more-btn">
+         Load more (${n} / ${total})
+       </button>`
+    : (total > n
+      ? `<p class="muted load-more-note">Showing ${n} of ${total} indexed games.</p>`
+      : "");
+  const cacheNote = p.from_cache
+    ? `<span class="muted cache-pill" title="Ranks + match list remembered ~5 min; finished games stay in SQLite">cached</span>`
+    : "";
   const matchesBlock = `<div class="recent-matches">
-    <div class="hover-section-label">Recent matches${(p.recent_matches || []).length ? ` (${p.recent_matches.length})` : ""}</div>
+    <div class="hover-section-label">Recent matches${n ? ` (${n}${total > n ? ` / ${total}` : ""})` : ""} ${cacheNote}</div>
     ${warn}
     ${matchRows || '<p class="muted">No recent matches returned (rate limit or empty history).</p>'}
+    ${more}
   </div>`;
 
   const itemsCompare = (them || me)

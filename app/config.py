@@ -15,7 +15,8 @@ def platform() -> str:
 
 
 def sync_match_count() -> int:
-    return int(os.environ.get("SYNC_MATCH_COUNT", "200"))
+    # Personal Sync index — enough for habits/matchups without chewing the whole season.
+    return int(os.environ.get("SYNC_MATCH_COUNT", "250"))
 
 
 # Stay under Riot personal-key defaults (20/1s, 100/2min) with a little headroom.

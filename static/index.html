@@ -13,6 +13,7 @@
       <a href="#live" data-tab="live">Live</a>
       <a href="#builds" data-tab="builds">Builds</a>
       <a href="#stats" data-tab="stats">Stats</a>
+      <a href="#postgame" data-tab="postgame">Postgame</a>
       <a href="#player" data-tab="player">Player</a>
       <a href="#setup" data-tab="setup">Setup</a>
     </nav>
@@ -28,23 +29,23 @@
       <div id="live" class="hidden">
         <div id="scoreboard" class="card"></div>
         <div id="fight"></div>
-        <div id="postgame-live"></div>
         <div id="teams">
-          <details id="ally-panel" open>
-            <summary>Your team</summary>
-            <div id="allies"></div>
-          </details>
           <details id="enemy-panel" open>
             <summary>Enemy team</summary>
             <div id="enemies"></div>
+          </details>
+          <details id="ally-panel" open>
+            <summary>Your team</summary>
+            <div id="allies"></div>
           </details>
         </div>
       </div>
       <div id="idle" class="card hidden">
         <h2>Not in a game</h2>
         <p class="muted">Start a match and this page will update automatically.
-          Your synced stats live in the <a href="#stats">Stats</a> tab.
-          Click any Riot ID to open the <a href="#player">Player</a> tab.</p>
+          Habits live in <a href="#stats">Stats</a>. After games, open
+          <a href="#postgame">Postgame</a> to review (Sync first).
+          Click any Riot ID for the <a href="#player">Player</a> tab.</p>
       </div>
     </section>
 
@@ -62,9 +63,19 @@
         <h2>Stats & habits</h2>
         <p class="muted">Win rates plus habit bubbles from your synced Riot history —
           weak CS / vision / fight stats light up red so you know what to improve (or ignore).
-          Below: after-match graphs vs your opponent + post-game report. Re-Sync after games to refresh.</p>
+          Full after-match reports live in the <a href="#postgame">Postgame</a> tab.</p>
         <div id="summary"></div>
-        <div id="postgame-stats"></div>
+      </div>
+    </section>
+
+    <section id="tab-postgame" class="tab-page hidden">
+      <div class="card">
+        <h2>Postgame</h2>
+        <p class="muted">Every synced game stays here — pick one to see grades, graphs, and
+          buy order. First open may use your Riot key; after that it loads from local cache.
+          Hit Sync in Setup after matches to add new games.</p>
+        <div id="postgame-list" class="pg-history"></div>
+        <div id="postgame-detail"></div>
       </div>
     </section>
 
@@ -93,7 +104,7 @@
         </div>
         <div class="row">
           <button id="sync-btn">Sync match history</button>
-          <span id="sync-status" class="muted"></span>
+          <span id="sync-status" class="muted sync-status"></span>
         </div>
         <p id="setup-error" class="error"></p>
         <hr class="divider" />

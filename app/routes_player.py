@@ -1,18 +1,27 @@
 """One-click / searchable player lookup via Riot Account + League-V4 + recent matches."""
 from __future__ import annotations
 
+import json
 import time
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app import config, ranks, riot
+from app import config, ranks, riot, store
 
 router = APIRouter(prefix="/api")
 
-# Show enough games that a 10–20 games/day player still looks "today-heavy".
-RECENT_MATCH_COUNT = 20
+# Newest match IDs kept for Load more (cheap: one list call).
+MATCH_ID_INDEX = 70
+# Details fetched per page (dev keys burn fast on Match-V5 detail).
+PAGE_SIZE = 20
+# Re-search same player within this window skips account/rank/id list calls.
+LOOKUP_TTL_SEC = 300
+
+# In-memory player lookup memory (this process only).
+# key: canonical riot id lowercased → profile + match_ids + summary map
+_lookups: dict[str, dict] = {}
 
 QUEUE_LABELS = {
     400: "Normal Draft",
@@ -256,112 +265,44 @@ def _played_at(info: dict) -> int:
     return int(ms // 1000)
 
 
-async def _recent_matches(
-    api: riot.RiotWebApi, client: httpx.AsyncClient, puuid: str, count: int = RECENT_MATCH_COUNT
-) -> tuple[list[dict], str | None]:
-    """Fetch newest matches with 429 retries. Returns (matches, warning_or_none)."""
-    # Prefer the last ~14 days so the list can't silently drift to stale seasons.
-    start_time = int(time.time()) - 14 * 86400
-    try:
-        ids = await api.get_match_ids(puuid, count, client, start_time=start_time)
-    except RuntimeError as e:
-        return [], str(e)
-    except Exception as e:
-        return [], f"Could not load match list: {e}"
-
-    if not ids:
-        # Fallback without startTime in case Riot's filter misbehaves for this account.
-        try:
-            ids = await api.get_match_ids(puuid, count, client)
-        except Exception as e:
-            return [], f"Could not load match list: {e}"
-
-    out: list[dict] = []
-    warning = None
-    for match_id in ids:
-        match, status = await api.fetch_match(client, match_id)
-        if status == "rate_limited":
-            warning = (
-                "Riot rate-limited mid-lookup — showing partial history. "
-                "Wait ~2 minutes and search again for the full list."
-            )
-            break
-        if status == "missing" or match is None:
-            continue
-        info = match.get("info") or {}
-        me = next((p for p in info.get("participants", []) if p.get("puuid") == puuid), None)
-        if not me:
-            continue
-        queue_id = info.get("queueId")
-        out.append({
-            "match_id": match_id,
-            "champion": me.get("championName"),
-            "win": bool(me.get("win")),
-            "kills": me.get("kills", 0),
-            "deaths": me.get("deaths", 0),
-            "assists": me.get("assists", 0),
-            "cs": (me.get("totalMinionsKilled") or 0) + (me.get("neutralMinionsKilled") or 0),
-            "damage": me.get("totalDamageDealtToChampions") or 0,
-            "queue_id": queue_id,
-            "queue": QUEUE_LABELS.get(queue_id, f"Queue {queue_id}"),
-            "duration": info.get("gameDuration", 0),
-            "played_at": _played_at(info),
-        })
-
-    out.sort(key=lambda m: m.get("played_at") or 0, reverse=True)
-    return out, warning
+def _match_summary(match: dict, match_id: str, puuid: str) -> dict | None:
+    info = match.get("info") or {}
+    me = next((p for p in info.get("participants", []) if p.get("puuid") == puuid), None)
+    if not me:
+        return None
+    queue_id = info.get("queueId")
+    return {
+        "match_id": match_id,
+        "champion": me.get("championName"),
+        "win": bool(me.get("win")),
+        "kills": me.get("kills", 0),
+        "deaths": me.get("deaths", 0),
+        "assists": me.get("assists", 0),
+        "cs": (me.get("totalMinionsKilled") or 0) + (me.get("neutralMinionsKilled") or 0),
+        "damage": me.get("totalDamageDealtToChampions") or 0,
+        "queue_id": queue_id,
+        "queue": QUEUE_LABELS.get(queue_id, f"Queue {queue_id}"),
+        "duration": info.get("gameDuration", 0),
+        "played_at": _played_at(info),
+    }
 
 
-@router.get("/player")
-async def lookup_player(riot_id: str = Query(..., min_length=3)):
-    """Look up a player's ranked stats, smurf signals, and recent matches."""
+def _parse_riot_id(riot_id: str) -> tuple[str, str]:
     if "#" not in riot_id:
         raise HTTPException(status_code=400, detail="Riot ID must look like Name#Tag.")
     name, tag = riot_id.split("#", 1)
     name, tag = name.strip(), tag.strip()
     if not name or not tag:
         raise HTTPException(status_code=400, detail="Riot ID must look like Name#Tag.")
-
-    # Practice-tool / custom bots aren't real accounts with useful history.
     if tag.upper() == "BOT" or name.lower().endswith(" bot"):
         raise HTTPException(
             status_code=400,
             detail="That looks like a co-op vs AI / practice bot, not a real player.",
         )
+    return name, tag
 
-    try:
-        api = riot.RiotWebApi(config.region(), config.platform())
-        account = await api.get_account(name, tag)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-    canonical = f"{account['gameName']}#{account['tagLine']}"
-    puuid = account["puuid"]
-
-    level = None
-    warning = None
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            try:
-                summoner = await api.get_summoner_by_puuid(client, puuid)
-                level = summoner.get("summonerLevel")
-            except Exception:
-                level = None
-            try:
-                entries = await api.get_league_entries(client, puuid)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Could not fetch ranks: {e}")
-            recent, warning = await _recent_matches(api, client, puuid, count=RECENT_MATCH_COUNT)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    solo = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
-    flex = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)
-    summary_solo = _entry_summary(solo, "Solo")
-    summary_flex = _entry_summary(flex, "Flex")
-
+def _cache_lookup_rank(canonical: str, summary_solo: dict | None, flex: dict | None) -> None:
     if summary_solo:
         ranks.cache_rank(canonical, {
             "tier": summary_solo["tier"],
@@ -379,22 +320,257 @@ async def lookup_player(riot_id: str = Query(..., min_length=3)):
     else:
         ranks.cache_rank(canonical, {"tier": None})
 
-    ranked_games = (summary_solo["games"] if summary_solo else 0) + (
-        summary_flex["games"] if summary_flex else 0
-    )
 
+async def _fetch_match_cached(
+    api: riot.RiotWebApi,
+    client: httpx.AsyncClient,
+    match_id: str,
+    conn=None,
+) -> tuple[dict | None, str]:
+    """Prefer SQLite match_cache; only hit Riot on a miss."""
+    own = conn is None
+    if own:
+        conn = store.connect()
+    try:
+        hit = store.get_match_payload(conn, match_id)
+        if hit is not None:
+            return hit, "ok"
+        match, status = await api.fetch_match(client, match_id)
+        if status == "ok" and match is not None:
+            store.put_match_payload(conn, match_id, match)
+        return match, status
+    finally:
+        if own:
+            conn.close()
+
+
+def _lookup_key(canonical: str) -> str:
+    return canonical.strip().lower()
+
+
+def _get_lookup(canonical: str) -> dict | None:
+    entry = _lookups.get(_lookup_key(canonical))
+    if not entry:
+        return None
+    if entry["expires"] < time.time():
+        _lookups.pop(_lookup_key(canonical), None)
+        return None
+    return entry
+
+
+def _put_lookup(entry: dict) -> None:
+    entry["expires"] = time.time() + LOOKUP_TTL_SEC
+    key = _lookup_key(entry["riot_id"])
+    _lookups[key] = entry
+
+
+def _ndjson(obj: dict) -> str:
+    return json.dumps(obj, separators=(",", ":")) + "\n"
+
+
+@router.get("/player")
+async def lookup_player(
+    riot_id: str = Query(..., min_length=3),
+    stream: bool = Query(False, description="NDJSON progress events while matches load"),
+    start: int = Query(0, ge=0, description="Match page offset for Load more"),
+    count: int = Query(PAGE_SIZE, ge=1, le=50, description="Matches to load this page"),
+):
+    """Look up a player's ranked stats, smurf signals, and recent matches."""
+    name, tag = _parse_riot_id(riot_id)
+    typed = f"{name}#{tag}"
+    api = riot.RiotWebApi(config.region(), config.platform())
+
+    cached = _get_lookup(typed)
+    if cached:
+        canonical = cached["riot_id"]
+        puuid = cached["puuid"]
+    else:
+        try:
+            account = await api.get_account(name, tag)
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        canonical = f"{account['gameName']}#{account['tagLine']}"
+        puuid = account["puuid"]
+
+    if stream:
+        return StreamingResponse(
+            _player_stream(api, canonical, puuid, typed_key=typed, start=start, count=count),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    # Non-stream JSON path (same caches / paging).
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        events = [ev async for ev in _player_event_iter(
+            api, client, canonical, puuid, typed_key=typed, start=start, count=count
+        )]
+    err = next((e for e in events if e.get("type") == "error"), None)
+    if err:
+        raise HTTPException(status_code=400, detail=err.get("detail") or "Lookup failed.")
+    done = next((e for e in events if e.get("type") == "done"), None)
+    meta = next((e for e in events if e.get("type") == "meta"), None)
+    if not done or not meta:
+        raise HTTPException(status_code=400, detail="Lookup returned no data.")
     payload = {
+        "riot_id": meta["riot_id"],
+        "puuid": meta["puuid"],
+        "solo": meta["solo"],
+        "flex": meta["flex"],
+        "summoner_level": meta["summoner_level"],
+        "smurf": done["smurf"],
+        "recent_matches": done["recent_matches"],
+        "matches_warning": done.get("matches_warning"),
+        "match_start": done.get("match_start", start),
+        "match_count": done.get("match_count", count),
+        "match_ids_total": done.get("match_ids_total", 0),
+        "has_more": done.get("has_more", False),
+        "from_cache": done.get("from_cache", False),
+    }
+    return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
+
+async def _player_event_iter(
+    api: riot.RiotWebApi,
+    client: httpx.AsyncClient,
+    canonical: str,
+    puuid: str,
+    *,
+    typed_key: str,
+    start: int,
+    count: int,
+):
+    """Shared generator body for stream + JSON (yields event dicts)."""
+    entry = _get_lookup(canonical) or _get_lookup(typed_key)
+    if entry is None:
+        level = None
+        try:
+            summoner = await api.get_summoner_by_puuid(client, puuid)
+            level = summoner.get("summonerLevel")
+        except Exception:
+            level = None
+        try:
+            entries = await api.get_league_entries(client, puuid)
+        except Exception as e:
+            yield {"type": "error", "detail": f"Could not fetch ranks: {e}"}
+            return
+
+        solo = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
+        flex = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)
+        summary_solo = _entry_summary(solo, "Solo")
+        summary_flex = _entry_summary(flex, "Flex")
+        _cache_lookup_rank(canonical, summary_solo, flex)
+        ranked_games = (summary_solo["games"] if summary_solo else 0) + (
+            summary_flex["games"] if summary_flex else 0
+        )
+        try:
+            match_ids = await api.get_match_ids(puuid, MATCH_ID_INDEX, client)
+        except Exception as e:
+            yield {"type": "error", "detail": f"Could not load match list: {e}"}
+            return
+        entry = {
+            "riot_id": canonical,
+            "puuid": puuid,
+            "solo": summary_solo,
+            "flex": summary_flex,
+            "summoner_level": level,
+            "ranked_games": ranked_games,
+            "match_ids": match_ids,
+            "summaries": {},
+        }
+        _put_lookup(entry)
+        _lookups[_lookup_key(typed_key)] = entry
+        cached_hit = False
+    else:
+        # Refresh TTL + alias under typed name
+        _put_lookup(entry)
+        _lookups[_lookup_key(typed_key)] = entry
+        summary_solo = entry["solo"]
+        summary_flex = entry["flex"]
+        level = entry["summoner_level"]
+        ranked_games = entry["ranked_games"]
+        cached_hit = True
+
+    yield {
+        "type": "meta",
         "riot_id": canonical,
         "puuid": puuid,
         "solo": summary_solo,
         "flex": summary_flex,
         "summoner_level": level,
-        "smurf": _smurf_signal(level, ranked_games, recent, summary_solo, summary_flex),
-        "recent_matches": recent,
-        "matches_warning": warning,
+        "from_cache": cached_hit,
+        "match_ids_total": len(entry["match_ids"]),
     }
-    # Prevent browsers from serving a stale lookup from an earlier session.
-    return JSONResponse(
-        content=payload,
-        headers={"Cache-Control": "no-store"},
-    )
+
+    page_ids = entry["match_ids"][start:start + count]
+    total = len(page_ids)
+    yield {"type": "progress", "done": 0, "total": total}
+
+    page_rows: list[dict] = []
+    warning = None
+    conn = store.connect()
+    try:
+        for i, match_id in enumerate(page_ids, start=1):
+            if match_id in entry["summaries"]:
+                row = entry["summaries"][match_id]
+                page_rows.append(row)
+                yield {"type": "match", "match": row, "cached": True}
+                yield {"type": "progress", "done": i, "total": total}
+                continue
+
+            match, status = await _fetch_match_cached(api, client, match_id, conn)
+            if status == "rate_limited":
+                warning = (
+                    "Riot rate-limited mid-lookup — showing partial history. "
+                    "Wait ~2 minutes and search again (cached games stay free)."
+                )
+                yield {"type": "progress", "done": i - 1, "total": total}
+                break
+            if status != "missing" and match is not None:
+                row = _match_summary(match, match_id, puuid)
+                if row:
+                    entry["summaries"][match_id] = row
+                    page_rows.append(row)
+                    yield {"type": "match", "match": row, "cached": False}
+            yield {"type": "progress", "done": i, "total": total}
+    finally:
+        conn.close()
+
+    _put_lookup(entry)
+    all_rows = list(entry["summaries"].values())
+    all_rows.sort(key=lambda m: m.get("played_at") or 0, reverse=True)
+    id_total = len(entry["match_ids"])
+    loaded_n = len(entry["summaries"])
+
+    yield {
+        "type": "done",
+        "smurf": _smurf_signal(level, ranked_games, all_rows, summary_solo, summary_flex),
+        "recent_matches": all_rows if start == 0 else page_rows,
+        "page_matches": page_rows,
+        "matches_warning": warning,
+        "match_start": start,
+        "match_count": count,
+        "match_ids_total": id_total,
+        "has_more": loaded_n < id_total and warning is None,
+        "from_cache": cached_hit,
+    }
+
+
+async def _player_stream(
+    api: riot.RiotWebApi,
+    canonical: str,
+    puuid: str,
+    *,
+    typed_key: str,
+    start: int = 0,
+    count: int = PAGE_SIZE,
+):
+    """Yield NDJSON: meta → progress/match… → done (or error)."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            async for ev in _player_event_iter(
+                api, client, canonical, puuid,
+                typed_key=typed_key, start=start, count=count,
+            ):
+                yield _ndjson(ev)
+    except Exception as e:
+        yield _ndjson({"type": "error", "detail": str(e)})

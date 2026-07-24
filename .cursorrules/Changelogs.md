@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026-07-23 17:40 — Postgame is its own lasting tab
+- **New Postgame tab**: synced games stay in a scrollable history — click any
+  game for grades / graphs / buy order. Reports + timelines save locally so
+  they don’t vanish after the next match.
+- Removed the disappearing post-game block from Live and Stats (Stats keeps
+  habits; Live links to Postgame after a game).
+- APIs: `GET /api/postgame/list`, `GET /api/postgame?match_id=` (uses report /
+  match / timeline caches before Riot).
+
+## 2026-07-23 10:35 — Match cache + Load more (save the dev key)
+- **SQLite `match_cache`**: finished games are stored once and reused by Player
+  lookup and Sync — no re-download of the same match_id.
+- **Player memory (~5 min)**: re-searching the same Riot ID skips account/rank/id
+  list calls for a bit (ranks don’t change that fast).
+- **Paging**: first load pulls **20** games; **Load more** grabs the next 20 from
+  a 70-id index. Progress bar still shows. (No production Riot key needed.)
+
+## 2026-07-23 10:28 — Progress bars for Player lookup + Sync
+- **Player search**: streams match loading with a real **X / 70** progress bar
+  (ranks show first, then matches fill in).
+- **Setup Sync**: same style bar while new matches are stored.
+- Backend: `?stream=1` NDJSON on `/api/player` and `/api/sync`.
+
+## 2026-07-23 10:08 — Camp pull-up dock + denser match history
+- **Camps**: map moved to a fixed **bottom-right pull-up** (small Camps tab + ▲/▼).
+  Open/closed remembered in localStorage; stays out of the Live scroll.
+- **Player recent matches**: now fetches the newest **70** games (was 20) with no
+  14-day startTime filter, so active accounts don’t look sparse. Personal Sync
+  default index raised to **250** (override with `SYNC_MATCH_COUNT`). Restart the
+  server, then re-search a player / hit Sync for the fuller lists.
+
+## 2026-07-23 09:48 — Camp schedule on the Rift map
+- **Camp UI**: schedule is no longer a text list — pins sit on the real Summoner's
+  Rift minimap (Community Dragon map11) with buff / camp / dragon / baron icons.
+  Both jungles + river; top pit swaps Grubs → Herald → Baron by game clock.
+  Still a schedule from `game_time`, not tracked clears. Also shows on last-game
+  replay so you can check the map out of game.
+
+## 2026-07-23 08:20 — Live cleanup + in-app camp schedule
+- **Live UI**: tighter scoreboard / fight / team rows (less padding, rank+lane on one
+  line with champ name, enemies listed first). Same dark theme — just denser and
+  easier to scan mid-game.
+- **Camp schedule (v1)**: new Live panel while in-game (`static/js/camps.js`) shows
+  typical spawn/respawn countdowns from live `game_time` for Blue/Red, Gromp,
+  Wolves, Raptors, Krugs, Dragon, Voidgrubs, Herald, and Baron. Labeled as a
+  **schedule** (not tracked clears — Live Client doesn’t give reliable camp kills).
+  True Windows overlay + CS-vs-ranks still later.
+
 ## 2026-07-23 01:52 — Stats page fix: habits bubbles + after-match graphs
 - **Bugfix**: running server was missing `GET /api/postgame` (404) and the DB
   lacked performance columns, so habits never unlocked. Restart migrates the

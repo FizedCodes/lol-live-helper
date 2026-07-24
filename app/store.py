@@ -1,7 +1,9 @@
 """SQLite storage for synced matches and matchup aggregation."""
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "helper.db"
@@ -55,6 +57,12 @@ CREATE TABLE IF NOT EXISTS matches (
     gold_earned INTEGER NOT NULL DEFAULT 0,
     perf_ready INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (puuid, match_id)
+);
+-- Finished Match-V5 payloads (immutable). Shared across Sync + Player lookup.
+CREATE TABLE IF NOT EXISTS match_cache (
+    match_id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    cached_at INTEGER NOT NULL
 );
 """
 
@@ -154,6 +162,21 @@ def connect() -> sqlite3.Connection:
     _migrate_matchups(conn)
     _backfill_matches_from_matchups(conn)
     _migrate_match_perf(conn)
+    # match_cache / timeline / saved post-game reports — older DBs pick these up here.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS match_cache ("
+        "match_id TEXT PRIMARY KEY, payload TEXT NOT NULL, cached_at INTEGER NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS timeline_cache ("
+        "match_id TEXT PRIMARY KEY, payload TEXT NOT NULL, cached_at INTEGER NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS postgame_reports ("
+        "puuid TEXT NOT NULL, match_id TEXT NOT NULL, payload TEXT NOT NULL, "
+        "cached_at INTEGER NOT NULL, PRIMARY KEY (puuid, match_id))"
+    )
+    conn.commit()
     return conn
 
 
@@ -166,6 +189,29 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
+    )
+    conn.commit()
+
+
+def get_match_payload(conn: sqlite3.Connection, match_id: str) -> dict | None:
+    """Return a cached Match-V5 JSON blob, or None."""
+    row = conn.execute(
+        "SELECT payload FROM match_cache WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except json.JSONDecodeError:
+        return None
+
+
+def put_match_payload(conn: sqlite3.Connection, match_id: str, payload: dict) -> None:
+    """Store a finished match. Safe to call repeatedly — payload is immutable."""
+    conn.execute(
+        "INSERT INTO match_cache (match_id, payload, cached_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(match_id) DO NOTHING",
+        (match_id, json.dumps(payload), int(time.time())),
     )
     conn.commit()
 
@@ -568,6 +614,117 @@ def latest_match_id(conn: sqlite3.Connection, puuid: str) -> str | None:
         (puuid,),
     ).fetchone()
     return row["match_id"] if row else None
+
+
+_QUEUE_LABELS = {
+    400: "Normal Draft",
+    420: "Ranked Solo",
+    430: "Normal Blind",
+    440: "Ranked Flex",
+    490: "Quickplay",
+}
+
+
+def recent_match_list(conn: sqlite3.Connection, puuid: str, limit: int = 40) -> list[dict]:
+    """Synced SR games newest-first — for the Postgame tab history (no Riot calls)."""
+    rows = conn.execute(
+        "SELECT match_id, my_champ, position, queue_id, win, played_at, "
+        "duration_s, kills, deaths, assists, cs, COALESCE(perf_ready, 0) AS perf_ready "
+        "FROM matches WHERE puuid = ? AND queue_id != 0 "
+        "ORDER BY played_at DESC, match_id DESC LIMIT ?",
+        (puuid, limit),
+    ).fetchall()
+    out = []
+    for r in rows:
+        qid = int(r["queue_id"] or 0)
+        out.append({
+            "match_id": r["match_id"],
+            "champion": r["my_champ"],
+            "position": r["position"],
+            "queue_id": qid,
+            "queue": _QUEUE_LABELS.get(qid, f"Queue {qid}"),
+            "win": bool(r["win"]),
+            "played_at": int(r["played_at"] or 0),
+            "duration_s": int(r["duration_s"] or 0),
+            "kills": int(r["kills"] or 0),
+            "deaths": int(r["deaths"] or 0),
+            "assists": int(r["assists"] or 0),
+            "cs": int(r["cs"] or 0),
+            "perf_ready": bool(r["perf_ready"]),
+            "has_match_cache": store_has_match_cache(conn, r["match_id"]),
+            "has_report_cache": store_has_report_cache(conn, puuid, r["match_id"]),
+        })
+    return out
+
+
+def owns_match(conn: sqlite3.Connection, puuid: str, match_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM matches WHERE puuid = ? AND match_id = ?",
+        (puuid, match_id),
+    ).fetchone()
+    return row is not None
+
+
+def store_has_match_cache(conn: sqlite3.Connection, match_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM match_cache WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    return row is not None
+
+
+def store_has_report_cache(conn: sqlite3.Connection, puuid: str, match_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM postgame_reports WHERE puuid = ? AND match_id = ?",
+        (puuid, match_id),
+    ).fetchone()
+    return row is not None
+
+
+def get_timeline_payload(conn: sqlite3.Connection, match_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT payload FROM timeline_cache WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except json.JSONDecodeError:
+        return None
+
+
+def put_timeline_payload(conn: sqlite3.Connection, match_id: str, payload: dict) -> None:
+    conn.execute(
+        "INSERT INTO timeline_cache (match_id, payload, cached_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(match_id) DO NOTHING",
+        (match_id, json.dumps(payload), int(time.time())),
+    )
+    conn.commit()
+
+
+def get_postgame_report(conn: sqlite3.Connection, puuid: str, match_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT payload FROM postgame_reports WHERE puuid = ? AND match_id = ?",
+        (puuid, match_id),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except json.JSONDecodeError:
+        return None
+
+
+def put_postgame_report(
+    conn: sqlite3.Connection, puuid: str, match_id: str, report: dict
+) -> None:
+    conn.execute(
+        "INSERT INTO postgame_reports (puuid, match_id, payload, cached_at) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(puuid, match_id) DO UPDATE SET "
+        "payload = excluded.payload, cached_at = excluded.cached_at",
+        (puuid, match_id, json.dumps(report), int(time.time())),
+    )
+    conn.commit()
 
 
 def champ_metric_avgs(conn: sqlite3.Connection, puuid: str, champ: str) -> dict:
