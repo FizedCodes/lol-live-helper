@@ -1,31 +1,116 @@
---add ai intergration for paid users [later]
-add overlay system for camp timers / cs aginst other ranks/ top players [later]
-<!-- partial: bottom-right pull-up camp map (static/js/camps.js) — SR minimap pins + game-clock schedule; NOT a Windows overlay, NOT real kill tracking; CS-vs-ranks still later -->
---add more signals for smurfs some profiles are being missed profiled <!-- done: scored signals — tier×games, OTP, grind pace, ranked WR, KDA/CS; watch vs flagged -->
+# TODO / Roadmap
 
---work on runes setups <!-- done: fight card shows you vs foe runes (live client + Data Dragon icons) -->
+North star: **free in-game overlay** for everyone; deep Stats / Postgame / Player stay in a companion dashboard (local first, optional hosted site later). Don’t ship “overlay + cloud + AI” as one release.
 
---add move speed indecator, add armour add ap, attack speed, ability haste, crit indecators <!-- done: your fight/hover chips use live championStats (AD/AP/Armor/MR/HP/AS/crit/MS/AH); enemies still item-estimated -->
+```
+Free 1.0 overlay  →  Live Client (:2999)
+Companion (optional) → local or hosted dashboard + Riot key on server
+Postgame death map → Match-V5 timeline (after the game; paid-friendly)
+```
 
---builds tab should be dynaic and update items as players buy it replacing options if needed. <!-- done: shopping list greys owned/in-progress, promotes situational swaps from enemy buys each poll -->
+**Ports (don’t mix these up):**
+- **8000** — this app’s dashboard (`uvicorn`)
+- **2999** — Riot Live Client (League only while in a game)
+- Timelines / death coords — Riot **Match-V5** web API (needs `RIOT_API_KEY`), not `:2999`
 
---build order should be an optional drop down <!-- done: collapsed <details>, preference in localStorage -->
+---
 
---fight compare should allow swap champ options for look up of stats of champs in different lanes. <!-- done: Compare vs dropdown on fight card -->
+## A. Ship blockers for “1.0” (local product)
 
---revamp builds tab [full remake] <!-- done: live shopping list + inventory strip + optional order + swap notes -->
+- [ ] **prod launcher** — `lolhelp.exe` or at least `lolhelp.cmd` so nobody types uvicorn
+- [ ] **auto-update** — check GitHub releases / version file so friends don’t rebuild from source
+- [ ] **first-run setup** — Riot ID + point to `.env` key in plain language; fail soft if key missing (Live/overlay still works)
+- [ ] **Riot key pain** — document daily regen; later: personal key stays on user’s machine and only optional “upload for cloud Sync”
+  <!-- done (partial): Setup session paste = memory-only for this uvicorn run; optional .env for persistence; never SQLite -->
+- [ ] **remove leftover “op.gg” wording** — do before any public share
+- [ ] **use League-friendly logos/icons** for live stats (careful with Riot asset rules)
+- [ ] **smoke checklist** — Live / Sync / Player / Postgame / key status after every release
 
---add after game stats like in professor so that players can see what they are bad at while in the game such as cs score was bad vision score is bad <!-- done: Postgame tab — grades CS/vision/KP/dmg/KDA; history of synced games stays; reports cached locally -->
---player tacker stats from op.gg. such as vision scores if they are bad at it it will be highlighted so they
-can improve on it or ignore it. <!-- done: Stats habit tracker from Match-V5 — weak CS/vision/KP/dmg/KDA highlighted; ✕ to ignore -->
---after game statics, graphs vs other players in same champ and vs other oppenets <!-- done: bar charts you vs laner + vs your champ avg on Postgame tab -->
---after match statics for oppenets, fight partisapation, kills under turret etc. <!-- done: opponent KP/turrets/dragons/wards + compare table -->
---after match item build order of player and oppenent. <!-- done: timeline buy order + final items for you and opponent -->
---intgrate more statics from other data brokers suchas op.gg <!-- partial: personal Riot-backed habit tracker on Stats (no scrape); broker APIs later -->
---remove op.gg from all text dont want to copyright
---use league of leagends logo for stats in live page
---the hover feature should freeze/open a small subwindow for the user to be able to see the oppenets habits
-and switch the tips at their own pace
+## B. Free overlay core (the real 1.0)
 
---timers should really be on a map <!-- done: SR minimap in Camps pull-up dock — buffs/camps/objectives pinned with countdowns -->
+### Overlay shell
+- [ ] **Windows overlay shell** — always-on-top, click-through toggle, hotkey show/hide, survives alt-tab into League
+- [ ] **honest labels** — spell/camp timers stay click/schedule-based; never fake auto-detection Riot doesn’t give
+- [ ] **overlay camp timers on map** — browser camps dock exists; real Windows overlay map still later
 
+### Overlay v1 live stats (from Live Client `:2999` + Sync baselines)
+- [ ] **matchup win rate + verdict** — personal WR vs lane opponent (SQLite), already on Live today → surface on overlay
+- [ ] **KDA** — live kills / deaths / assists
+- [ ] **farm** — CS and CS/min from `creepScore` + `gameTime`
+- [ ] **gold per minute** — your gold / game minutes (you; Live Client is richest for active player)
+- [ ] **kill participation** — (K+A) / ally team kills this game
+- [ ] **objectives** — ticks from Live `eventdata` (dragon, baron, towers, etc.)
+- [ ] **vision / ward score** — player ward score pace (Live); not full end-game vision score until Match-V5
+- [ ] **summoner spell tracker** — Flash/Heal/etc. click-to-arm CDs (see `.cursorrules/SpellTracker.md`)
+- [ ] **camp / objective strip** — reuse camps schedule logic on the overlay
+
+### Live habits (possible — sample Live Client over game clock)
+Stats habits today are **end-of-sync averages only**. Live habits *can* timestamp when you fall behind — Riot gives continuous CS / KDA / ward score / events.
+
+- [ ] **live habit coach** — compare current-game CS/min, ward-score pace, KP, your GPM to *your* Sync role baselines; nudge when weak
+- [ ] **habit timestamps** — log the **game clock** when a metric crosses “weak” (e.g. CS deficit starts ~5:00); show on overlay + save for Postgame review
+- [ ] **Stats ↔ overlay focus** — pin “habits I’m working on” from Stats ignore/focus list into overlay nudges
+- [ ] **not live (be honest)** — “didn’t gank after clear”, exact ward *placement* tiles, death **map coords** mid-game (no Live Client positions)
+
+### Later overlay
+- [ ] **CS vs ranks / top players** [later] — needs external data or huge personal samples
+
+## C. Companion dashboard (browser / later website)
+
+- [ ] **UI revamp pass** — kill generic dark-card “AI dashboard” look; one visual language, denser Live, quieter Setup
+- [ ] **declutter Live** — default: opponent + fight + spells; hide full both-teams behind “expand”
+- [ ] **Builds clunk** — fewer words, clearer “buy next”; situational swaps as small chips not essays
+- [ ] Shorten every tab’s intro paragraph to one line
+- [ ] Live idle state: one CTA (“queue up”) not a tour of all tabs
+- [ ] Consistent icon language (champ / spell / item) before more features
+- [ ] **habit history UI** — show timestamped weak windows from live games (“you usually drop CS after 8:00”)
+
+## D. Hosted website + client transmit (after overlay works)
+
+- [ ] **thin client** — local agent reads `:2999`, optional encrypt/upload live snapshot to *your* backend
+- [ ] **hosted frontend** — same tabs as today, but API is your cloud (Riot key on server for Sync/Player; Live data from user’s client)
+- [ ] **opt-in only** — free overlay works offline; cloud is “if they want”
+- [ ] **accounts / privacy** — simple Riot ID login + “wipe my data”; never store keys in the browser
+- [ ] **rate limits / cost** — one shared Riot key for all users will die; plan per-user keys or paid tier before public cloud Sync
+
+## E. Paid / Postgame extras (Match-V5 API pulls)
+
+Timeline is **already fetched** for buy order (`timeline_cache` + `postgame.py`). Extend the same pull — do **not** invent a second Riot path.
+
+- [ ] **death coords from Match-V5 timeline** — parse `CHAMPION_KILL` events (`position.x/y`, killer, victim, assists, time); map `participantId` → champ/name from match payload
+- [ ] **Postgame death map UI** — pin your deaths on SR minimap (reuse camps minimap patterns); click pin → killer + assists + game time
+- [ ] **“how you died”** — show **who** killed you (+ assists); *not* which ability (API doesn’t give that)
+- [ ] **death patterns across games** — optional paid: “you die river a lot 10–15 min” from cached timelines
+- [ ] AI coach on Postgame / live tips [later]
+- [ ] broker APIs only if legal + worth it (personal Match-V5 first)
+- [ ] teammate-shared spell timers
+- [ ] ultimate trackers
+
+---
+
+## Suggested release order
+
+| Phase | Name | Outcome |
+|-------|------|---------|
+| **0.8** | Local companion | Dashboard tabs + Riot service + session/env key <!-- shipped 2026-07-25 --> |
+| **0.9** | Polish local app | Launcher, kill op.gg text, UI declutter, spell click-timers in browser Live |
+| **1.0** | Free overlay | Exe + overlay live stats (WR/KDA/CS/GPM/KP/objectives/vision) + live habit nudges |
+| **1.1** | Habit depth | Timestamped habit windows saved; Stats/Postgame show “when you usually fail” |
+| **1.2** | Death map | Match-V5 timeline death coords on Postgame (paid-friendly) |
+| **1.5** | Optional cloud | Hosted site; client transmit opt-in; Sync/Player on server |
+| **2.0** | Paid extras | AI + death-pattern insights + more |
+
+---
+
+## Already shipped (archive — don’t rebuild)
+
+- Smurf signals (tier×games, OTP, grind, ranked WR, KDA/CS)
+- Fight card runes (you vs foe) + Compare vs dropdown
+- Live fight/hover chips from championStats (you); enemies item-estimated
+- Builds shopping list + situational swaps + optional build order
+- Postgame tab (grades, graphs, opponent, buy order, cached reports)
+- Stats habit bubbles from Match-V5 (ignore ✕) — *end-of-sync averages, not live yet*
+- Match-V5 timeline fetch + cache — *used for item buy order only so far*
+- Camps SR minimap pull-up (schedule, not real kill tracking)
+- Player lookup last-30-days + Refresh / Clear cache
+- Riot API key server-only: Setup session paste (RAM) and/or `RIOT_API_KEY` in `.env` (see `.cursorrules/RiotApiRefactor.md`)

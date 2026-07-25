@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <h1>LoL <span>Live Helper</span></h1>
+    <h1>LoL <span>Live Helper</span> <small class="ver">0.8</small></h1>
     <nav class="tabs">
       <a href="#live" data-tab="live">Live</a>
       <a href="#builds" data-tab="builds">Builds</a>
@@ -83,7 +83,8 @@
       <div class="card">
         <h2>Player lookup</h2>
         <p class="muted">Search any Riot ID, or click a name on the Live tab. During a game this
-          also shows <b>your items vs theirs</b> side by side.</p>
+          also shows <b>your items vs theirs</b> side by side. After a match, use
+          <b>Refresh games</b> (or <b>Clear cache</b> then refresh) so the new game shows up.</p>
         <div class="row">
           <input id="player-search" class="wide" placeholder="Name#Tag" />
           <button id="player-search-btn">Search</button>
@@ -108,12 +109,19 @@
         </div>
         <p id="setup-error" class="error"></p>
         <hr class="divider" />
-        <p class="muted">Riot API key — dev keys expire every 24h. Grab a fresh one at
-          <a href="https://developer.riotgames.com" target="_blank">developer.riotgames.com</a> and paste it here
-          (no restart needed).</p>
+        <p class="muted">Riot API key (for Sync / Player / ranks). Paste below for
+          <strong>this server session only</strong> — never saved to disk, gone when you
+          stop the app. Optional: put <code>RIOT_API_KEY</code> in <code>.env</code> instead
+          so it survives restarts. Dev keys expire every 24h at
+          <a href="https://developer.riotgames.com" target="_blank">developer.riotgames.com</a>.</p>
         <div class="row">
-          <input id="api-key" class="wide" type="text" placeholder="RGAPI-..." autocomplete="off" spellcheck="false" />
-          <button id="save-key">Save key</button>
+          <input id="session-api-key" type="password" autocomplete="off"
+            placeholder="RGAPI-… (this session only)" />
+          <button id="use-session-key" type="button">Use for this session</button>
+          <button id="clear-session-key" type="button" class="ghost">Clear session key</button>
+        </div>
+        <div class="row">
+          <button id="check-key" type="button">Check key status</button>
           <span id="key-status" class="muted"></span>
         </div>
       </div>

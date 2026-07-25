@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from app import config, postgame, riot, store
+from app import postgame, riot_service, store
 
 router = APIRouter(prefix="/api")
 
@@ -68,7 +68,12 @@ async def postgame_report(
 
     if need_match or need_timeline:
         try:
-            api = riot.RiotWebApi(config.region(), config.platform())
+            if not riot_service.has_api_key():
+                raise RuntimeError(
+                    "No Riot API key configured. Paste one in Setup for this session, "
+                    "or set RIOT_API_KEY in .env and restart."
+                )
+            api = riot_service.web_api()
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 

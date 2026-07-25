@@ -415,20 +415,21 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
     : "";
   const n = (p.recent_matches || []).length;
   const total = p.match_ids_total || n;
+  const days = p.history_days || 30;
   const more = p.has_more
     ? `<button type="button" id="player-load-more" class="ghost load-more-btn">
          Load more (${n} / ${total})
        </button>`
     : (total > n
-      ? `<p class="muted load-more-note">Showing ${n} of ${total} indexed games.</p>`
+      ? `<p class="muted load-more-note">Showing ${n} of ${total} games (last ${days} days).</p>`
       : "");
   const cacheNote = p.from_cache
-    ? `<span class="muted cache-pill" title="Ranks + match list remembered ~5 min; finished games stay in SQLite">cached</span>`
+    ? `<span class="muted cache-pill" title="Ranks remembered ~5 min; match list re-checks on each search so new games show up">cached ranks</span>`
     : "";
   const matchesBlock = `<div class="recent-matches">
-    <div class="hover-section-label">Recent matches${n ? ` (${n}${total > n ? ` / ${total}` : ""})` : ""} ${cacheNote}</div>
+    <div class="hover-section-label">Recent matches · last ${days} days${n ? ` (${n}${total > n ? ` / ${total}` : ""})` : ""} ${cacheNote}</div>
     ${warn}
-    ${matchRows || '<p class="muted">No recent matches returned (rate limit or empty history).</p>'}
+    ${matchRows || `<p class="muted">No games in the last ${days} days (or rate limit / empty history).</p>`}
     ${more}
   </div>`;
 
@@ -446,7 +447,13 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
   container.innerHTML = `
     <div class="player-card-head">
       <h3>${p.riot_id}</h3>
-      <button type="button" id="player-card-close" class="ghost">Clear</button>
+      <div class="player-card-actions">
+        <button type="button" id="player-refresh" class="ghost"
+          title="Re-pull ranks + recent games from Riot (use after you finish a match)">Refresh games</button>
+        <button type="button" id="player-clear-cache" class="ghost"
+          title="Delete local cache for this player, then re-pull fresh">Clear cache</button>
+        <button type="button" id="player-card-close" class="ghost">Close</button>
+      </div>
     </div>
     <div class="wr-cards player-rank-cards">
       <div class="wr-card"><div class="wr-card-label">Solo / Duo</div>${q(p.solo)}</div>

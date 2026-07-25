@@ -5,7 +5,7 @@ import asyncio
 
 import httpx
 
-from app import config, riot
+from app import riot_service
 
 # Ranks don't change mid-game, so cache lookups for the server's lifetime
 _cache: dict[str, dict | None] = {}
@@ -18,9 +18,7 @@ def cache_rank(riot_id: str, rank: dict | None) -> None:
 
 async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
     """Resolve each Riot ID to its ranked entry (solo queue preferred, else flex)."""
-    try:
-        api = riot.RiotWebApi(config.region(), config.platform())
-    except RuntimeError:
+    if not riot_service.has_api_key():
         return {}  # no API key: skip ranks, the rest of the live view still works
 
     async def one(client: httpx.AsyncClient, rid: str) -> tuple[str, dict | None]:
@@ -29,8 +27,8 @@ async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
         try:
             name, tag = rid.split("#", 1)
             # Shared Riot rate limiter spaces these out; gather just pipelines the waits.
-            account = await api.get_account(name, tag, client)
-            entries = await api.get_league_entries(client, account["puuid"])
+            account = await riot_service.get_account(name, tag, client)
+            entries = await riot_service.get_league_entries(client, account["puuid"])
             solo = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
             flex = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)
             entry = solo or flex

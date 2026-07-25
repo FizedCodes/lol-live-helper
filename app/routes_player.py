@@ -7,20 +7,30 @@ import time
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
-from app import config, ranks, riot, store
+from app import ranks, riot_service, store
+from app.riot import RiotWebApi
 
 router = APIRouter(prefix="/api")
 
+
+class PlayerCacheClearIn(BaseModel):
+    riot_id: str = Field(..., min_length=3)
+    match_ids: list[str] = Field(default_factory=list)
 # Newest match IDs kept for Load more (cheap: one list call).
 MATCH_ID_INDEX = 70
 # Details fetched per page (dev keys burn fast on Match-V5 detail).
 PAGE_SIZE = 20
-# Re-search same player within this window skips account/rank/id list calls.
+# Re-search same player within this window keeps ranks (solo/flex/level).
+# Match-id lists are always re-pulled on first-page search so new games show up.
 LOOKUP_TTL_SEC = 300
+# Player history only cares about recent games — older than this are dropped.
+HISTORY_MAX_AGE_SEC = 30 * 86400
 
 # In-memory player lookup memory (this process only).
 # key: canonical riot id lowercased → profile + match_ids + summary map
+# Ranks stay warm for LOOKUP_TTL_SEC; match_ids refresh on every start=0 search.
 _lookups: dict[str, dict] = {}
 
 QUEUE_LABELS = {
@@ -322,7 +332,7 @@ def _cache_lookup_rank(canonical: str, summary_solo: dict | None, flex: dict | N
 
 
 async def _fetch_match_cached(
-    api: riot.RiotWebApi,
+    api: RiotWebApi,
     client: httpx.AsyncClient,
     match_id: str,
     conn=None,
@@ -364,6 +374,49 @@ def _put_lookup(entry: dict) -> None:
     _lookups[key] = entry
 
 
+def _clear_lookup_memory(riot_id: str) -> tuple[list[str], bool]:
+    """Drop in-memory lookup rows for this Riot ID. Returns (match_ids, found)."""
+    target = _lookup_key(riot_id)
+    match_ids: list[str] = []
+    found = False
+    for key, entry in list(_lookups.items()):
+        rid = _lookup_key(entry.get("riot_id") or "")
+        if key == target or rid == target:
+            found = True
+            match_ids.extend(entry.get("match_ids") or [])
+            _lookups.pop(key, None)
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for mid in match_ids:
+        if mid and mid not in seen:
+            seen.add(mid)
+            uniq.append(mid)
+    return uniq, found
+
+
+def _history_cutoff() -> int:
+    return int(time.time()) - HISTORY_MAX_AGE_SEC
+
+
+def _summaries_in_id_order(entry: dict, start: int, count: int) -> list[dict]:
+    """Stable newest-first order from Riot's id list (not a re-sort by clock)."""
+    cutoff = _history_cutoff()
+    rows: list[dict] = []
+    for mid in entry["match_ids"][start:start + count]:
+        row = entry["summaries"].get(mid)
+        if not row:
+            continue
+        if int(row.get("played_at") or 0) < cutoff:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _all_summaries_in_id_order(entry: dict) -> list[dict]:
+    return _summaries_in_id_order(entry, 0, len(entry["match_ids"]))
+
+
 def _ndjson(obj: dict) -> str:
     return json.dumps(obj, separators=(",", ":")) + "\n"
 
@@ -374,35 +427,44 @@ async def lookup_player(
     stream: bool = Query(False, description="NDJSON progress events while matches load"),
     start: int = Query(0, ge=0, description="Match page offset for Load more"),
     count: int = Query(PAGE_SIZE, ge=1, le=50, description="Matches to load this page"),
+    refresh: bool = Query(False, description="Ignore in-memory lookup and re-pull id list"),
 ):
     """Look up a player's ranked stats, smurf signals, and recent matches."""
     name, tag = _parse_riot_id(riot_id)
     typed = f"{name}#{tag}"
-    api = riot.RiotWebApi(config.region(), config.platform())
+    api = riot_service.web_api()
 
-    cached = _get_lookup(typed)
+    if refresh:
+        _lookups.pop(_lookup_key(typed), None)
+
+    cached = None if refresh else _get_lookup(typed)
     if cached:
         canonical = cached["riot_id"]
         puuid = cached["puuid"]
     else:
         try:
-            account = await api.get_account(name, tag)
+            account = await riot_service.get_account(name, tag)
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))
         canonical = f"{account['gameName']}#{account['tagLine']}"
         puuid = account["puuid"]
+        if refresh:
+            _lookups.pop(_lookup_key(canonical), None)
 
     if stream:
         return StreamingResponse(
-            _player_stream(api, canonical, puuid, typed_key=typed, start=start, count=count),
+            _player_stream(
+                api, canonical, puuid,
+                typed_key=typed, start=start, count=count, refresh=refresh,
+            ),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store"},
         )
 
-    # Non-stream JSON path (same caches / paging).
     async with httpx.AsyncClient(timeout=20.0) as client:
         events = [ev async for ev in _player_event_iter(
-            api, client, canonical, puuid, typed_key=typed, start=start, count=count
+            api, client, canonical, puuid,
+            typed_key=typed, start=start, count=count, refresh=refresh,
         )]
     err = next((e for e in events if e.get("type") == "error"), None)
     if err:
@@ -423,14 +485,50 @@ async def lookup_player(
         "match_start": done.get("match_start", start),
         "match_count": done.get("match_count", count),
         "match_ids_total": done.get("match_ids_total", 0),
+        "next_start": done.get("next_start", start + count),
         "has_more": done.get("has_more", False),
         "from_cache": done.get("from_cache", False),
+        "ids_refreshed": done.get("ids_refreshed", False),
+        "history_days": 30,
     }
     return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
 
+@router.post("/player/cache/clear")
+async def clear_player_cache(body: PlayerCacheClearIn):
+    """Wipe in-memory lookup + SQLite match blobs for this player.
+
+    `match_ids` is optional — when omitted we use whatever the in-memory index
+    still knows. The Player tab sends ids from the open card as a backup.
+    """
+    name, tag = _parse_riot_id(body.riot_id.strip())
+    typed = f"{name}#{tag}"
+
+    mem_ids, found = _clear_lookup_memory(typed)
+    match_ids: list[str] = []
+    seen: set[str] = set()
+    for mid in [*mem_ids, *[m for m in body.match_ids if m]]:
+        if mid not in seen:
+            seen.add(mid)
+            match_ids.append(mid)
+
+    deleted = 0
+    if match_ids:
+        conn = store.connect()
+        try:
+            deleted = store.delete_match_payloads(conn, match_ids)
+        finally:
+            conn.close()
+
+    return {
+        "ok": True,
+        "riot_id": typed,
+        "cleared_memory": found,
+        "cleared_matches": deleted,
+    }
+
 async def _player_event_iter(
-    api: riot.RiotWebApi,
+    api: RiotWebApi,
     client: httpx.AsyncClient,
     canonical: str,
     puuid: str,
@@ -438,18 +536,19 @@ async def _player_event_iter(
     typed_key: str,
     start: int,
     count: int,
+    refresh: bool = False,
 ):
     """Shared generator body for stream + JSON (yields event dicts)."""
-    entry = _get_lookup(canonical) or _get_lookup(typed_key)
+    entry = None if refresh else (_get_lookup(canonical) or _get_lookup(typed_key))
     if entry is None:
         level = None
         try:
-            summoner = await api.get_summoner_by_puuid(client, puuid)
+            summoner = await riot_service.get_summoner_by_puuid(client, puuid)
             level = summoner.get("summonerLevel")
         except Exception:
             level = None
         try:
-            entries = await api.get_league_entries(client, puuid)
+            entries = await riot_service.get_league_entries(client, puuid)
         except Exception as e:
             yield {"type": "error", "detail": f"Could not fetch ranks: {e}"}
             return
@@ -463,7 +562,9 @@ async def _player_event_iter(
             summary_flex["games"] if summary_flex else 0
         )
         try:
-            match_ids = await api.get_match_ids(puuid, MATCH_ID_INDEX, client)
+            match_ids = await riot_service.get_match_ids(
+                puuid, MATCH_ID_INDEX, client, start_time=_history_cutoff()
+            )
         except Exception as e:
             yield {"type": "error", "detail": f"Could not load match list: {e}"}
             return
@@ -476,12 +577,13 @@ async def _player_event_iter(
             "ranked_games": ranked_games,
             "match_ids": match_ids,
             "summaries": {},
+            "fetched_through": 0,  # highest id-index we've attempted (+1)
         }
         _put_lookup(entry)
         _lookups[_lookup_key(typed_key)] = entry
         cached_hit = False
+        ids_refreshed = True
     else:
-        # Refresh TTL + alias under typed name
         _put_lookup(entry)
         _lookups[_lookup_key(typed_key)] = entry
         summary_solo = entry["solo"]
@@ -489,7 +591,32 @@ async def _player_event_iter(
         level = entry["summoner_level"]
         ranked_games = entry["ranked_games"]
         cached_hit = True
+        entry.setdefault("fetched_through", 0)
+        ids_refreshed = False
 
+        # Re-search (first page) always re-pulls the match-id list so a just-finished
+        # game shows up. Ranks stay cached. Load more keeps the frozen list for stable paging.
+        if start == 0:
+            try:
+                fresh_ids = await riot_service.get_match_ids(
+                    puuid, MATCH_ID_INDEX, client, start_time=_history_cutoff()
+                )
+            except Exception as e:
+                yield {"type": "error", "detail": f"Could not load match list: {e}"}
+                return
+            ids_refreshed = True
+            if fresh_ids != entry.get("match_ids"):
+                entry["match_ids"] = fresh_ids
+                # Indexes shift when new games appear — reset the Load more cursor.
+                entry["fetched_through"] = 0
+                # Drop summaries for games that fell out of the window (optional tidy).
+                keep = set(fresh_ids)
+                entry["summaries"] = {
+                    mid: row for mid, row in entry.get("summaries", {}).items() if mid in keep
+                }
+            _put_lookup(entry)
+
+    id_total = len(entry["match_ids"])
     yield {
         "type": "meta",
         "riot_id": canonical,
@@ -498,8 +625,27 @@ async def _player_event_iter(
         "flex": summary_flex,
         "summoner_level": level,
         "from_cache": cached_hit,
-        "match_ids_total": len(entry["match_ids"]),
+        "ids_refreshed": ids_refreshed,
+        "match_ids_total": id_total,
+        "history_days": 30,
     }
+
+    if id_total == 0:
+        yield {
+            "type": "done",
+            "smurf": _smurf_signal(level, ranked_games, [], summary_solo, summary_flex),
+            "recent_matches": [],
+            "page_matches": [],
+            "matches_warning": "No games in the last 30 days.",
+            "match_start": start,
+            "match_count": count,
+            "match_ids_total": 0,
+            "next_start": 0,
+            "has_more": False,
+            "from_cache": cached_hit,
+            "ids_refreshed": ids_refreshed,
+        }
+        return
 
     page_ids = entry["match_ids"][start:start + count]
     total = len(page_ids)
@@ -507,13 +653,15 @@ async def _player_event_iter(
 
     page_rows: list[dict] = []
     warning = None
+    cutoff = _history_cutoff()
     conn = store.connect()
     try:
         for i, match_id in enumerate(page_ids, start=1):
             if match_id in entry["summaries"]:
                 row = entry["summaries"][match_id]
-                page_rows.append(row)
-                yield {"type": "match", "match": row, "cached": True}
+                if int(row.get("played_at") or 0) >= cutoff:
+                    page_rows.append(row)
+                    yield {"type": "match", "match": row, "cached": True}
                 yield {"type": "progress", "done": i, "total": total}
                 continue
 
@@ -529,47 +677,62 @@ async def _player_event_iter(
                 row = _match_summary(match, match_id, puuid)
                 if row:
                     entry["summaries"][match_id] = row
-                    page_rows.append(row)
-                    yield {"type": "match", "match": row, "cached": False}
+                    if int(row.get("played_at") or 0) >= cutoff:
+                        page_rows.append(row)
+                        yield {"type": "match", "match": row, "cached": False}
             yield {"type": "progress", "done": i, "total": total}
     finally:
         conn.close()
 
+    # Advance cursor by id-list index, not by how many summaries succeeded.
+    entry["fetched_through"] = max(entry.get("fetched_through", 0), start + len(page_ids))
     _put_lookup(entry)
-    all_rows = list(entry["summaries"].values())
-    all_rows.sort(key=lambda m: m.get("played_at") or 0, reverse=True)
-    id_total = len(entry["match_ids"])
-    loaded_n = len(entry["summaries"])
+
+    all_rows = _all_summaries_in_id_order(entry)
+    # UI list for this response:
+    # - first page (start=0): everything loaded so far in id order (stable growth)
+    # - load more: only this page (frontend appends)
+    if start == 0:
+        display_rows = all_rows
+    else:
+        display_rows = page_rows
+
+    next_start = start + len(page_ids)
+    has_more = next_start < id_total and warning is None
 
     yield {
         "type": "done",
         "smurf": _smurf_signal(level, ranked_games, all_rows, summary_solo, summary_flex),
-        "recent_matches": all_rows if start == 0 else page_rows,
+        "recent_matches": display_rows,
         "page_matches": page_rows,
         "matches_warning": warning,
         "match_start": start,
         "match_count": count,
         "match_ids_total": id_total,
-        "has_more": loaded_n < id_total and warning is None,
+        "next_start": next_start,
+        "has_more": has_more,
         "from_cache": cached_hit,
+        "ids_refreshed": ids_refreshed,
+        "history_days": 30,
     }
 
 
 async def _player_stream(
-    api: riot.RiotWebApi,
+    api: RiotWebApi,
     canonical: str,
     puuid: str,
     *,
     typed_key: str,
     start: int = 0,
     count: int = PAGE_SIZE,
+    refresh: bool = False,
 ):
     """Yield NDJSON: meta → progress/match… → done (or error)."""
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             async for ev in _player_event_iter(
                 api, client, canonical, puuid,
-                typed_key=typed_key, start=start, count=count,
+                typed_key=typed_key, start=start, count=count, refresh=refresh,
             ):
                 yield _ndjson(ev)
     except Exception as e:

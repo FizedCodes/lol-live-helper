@@ -20,7 +20,7 @@ A **local web dashboard** (Windows, opened in a browser at `http://localhost:800
 Dependencies are already installed in `.venv`. Data lives in `data/helper.db` (SQLite, gitignored).
 
 ## Gotchas an agent must know
-- **Riot dev API keys expire every 24h.** Most "nothing works" reports trace back to this. The key can be updated from the site's Setup panel (stored in DB meta, wins over `.env`). Header pill shows key status.
+- **Riot dev API keys expire every 24h.** Most "nothing works" reports trace back to this. Paste a key in Setup for this server session (memory only), or set `RIOT_API_KEY` in `.env` and restart. Raw key is never returned by `/api/config`. Header pill + Setup “Check key status” show validity.
 - `RIOT_REGION` (americas/europe/asia/sea) routes Match-V5/Account-V1; `RIOT_PLATFORM` (na1, euw1, ...) routes League-V4 ranks. Both in `.env`.
 - Dev key rate limit: 100 requests / 2 min (and ~20/s). The app self-throttles via
   `rate_limit.py` (defaults 90/2min + 18/1s; override with `RIOT_RATE_LIMIT_*` env vars).

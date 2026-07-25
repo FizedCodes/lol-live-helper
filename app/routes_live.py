@@ -6,7 +6,7 @@ import time
 
 from fastapi import APIRouter
 
-from app import analysis, ranks, riot, store
+from app import analysis, ranks, riot_service, store
 
 router = APIRouter(prefix="/api")
 
@@ -117,7 +117,7 @@ def _runes_of(p: dict, *, full: dict | None = None) -> dict | None:
 
 @router.get("/live")
 async def live():
-    game = await riot.fetch_live_game()
+    game = await riot_service.fetch_live_game()
     if game is None:
         conn = store.connect()
         try:

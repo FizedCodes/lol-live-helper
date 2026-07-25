@@ -1,10 +1,10 @@
-"""Settings endpoints: Riot ID and API key management."""
+"""Settings endpoints: Riot ID + session/env key status (raw key never returned)."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app import config, riot, store
+from app import config, riot, riot_service, store
 
 router = APIRouter(prefix="/api")
 
@@ -15,23 +15,20 @@ class ConfigIn(BaseModel):
 
 
 class KeyIn(BaseModel):
-    key: str
+    api_key: str
 
 
 @router.get("/config")
 async def get_config():
     conn = store.connect()
     try:
-        # Localhost-only app: return the key so the Setup field can show it in plain text
-        key = config.current_api_key()
         return {
             "game_name": store.get_meta(conn, "game_name"),
             "tag_line": store.get_meta(conn, "tag_line"),
             "region": config.region(),
             "platform": config.platform(),
-            "has_api_key": key is not None,
+            "has_api_key": riot_service.has_api_key(),
             "key_source": config.key_source(),
-            "api_key": key or "",
         }
     finally:
         conn.close()
@@ -40,8 +37,9 @@ async def get_config():
 @router.post("/config")
 async def set_config(cfg: ConfigIn):
     try:
-        api = riot.RiotWebApi(config.region())
-        account = await api.get_account(cfg.game_name.strip(), cfg.tag_line.strip().lstrip("#"))
+        account = await riot_service.get_account(
+            cfg.game_name.strip(), cfg.tag_line.strip().lstrip("#")
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Store the canonical casing Riot returns, not what was typed
@@ -59,26 +57,44 @@ async def set_config(cfg: ConfigIn):
 
 @router.post("/key")
 async def set_key(body: KeyIn):
-    key = body.key.strip()
-    if not key.startswith("RGAPI-"):
-        raise HTTPException(status_code=400, detail="That doesn't look like a Riot API key (should start with RGAPI-).")
+    """Hold a key in server memory for this process only — never SQLite / .env."""
+    try:
+        key = config.set_session_api_key(body.api_key)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     try:
         valid = await riot.validate_key(key, config.platform())
-    except Exception:
-        raise HTTPException(status_code=502, detail="Could not reach Riot to validate the key. Try again.")
-    if not valid:
-        raise HTTPException(status_code=400, detail="Riot rejected that key — it may be expired or mistyped.")
-    config.save_api_key(key)
-    return {"ok": True}
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Key stored for this session, but Riot could not be reached: {e}",
+        )
+    if valid is False:
+        config.clear_session_api_key()
+        raise HTTPException(
+            status_code=400,
+            detail="Riot rejected that key (expired?). Get a fresh one at developer.riotgames.com.",
+        )
+    return {
+        "ok": True,
+        "valid": valid,
+        "source": "session",
+        "persisted": False,
+    }
+
+
+@router.delete("/key")
+async def clear_key():
+    """Clear the in-memory session key. Env RIOT_API_KEY (if set) still applies."""
+    config.clear_session_api_key()
+    return {
+        "ok": True,
+        "has_api_key": riot_service.has_api_key(),
+        "key_source": config.key_source(),
+    }
 
 
 @router.get("/key/status")
 async def key_status():
-    key = config.current_api_key()
-    if not key:
-        return {"configured": False, "valid": None, "source": None}
-    try:
-        valid = await riot.validate_key(key, config.platform())
-    except Exception:
-        valid = None  # couldn't reach Riot; unknown
-    return {"configured": True, "valid": valid, "source": config.key_source()}
+    """Same payload as /api/riot/key-status (kept for existing UI)."""
+    return await riot_service.key_status()

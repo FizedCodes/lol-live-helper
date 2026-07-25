@@ -216,6 +216,20 @@ def put_match_payload(conn: sqlite3.Connection, match_id: str, payload: dict) ->
     conn.commit()
 
 
+def delete_match_payloads(conn: sqlite3.Connection, match_ids: list[str]) -> int:
+    """Remove finished Match-V5 blobs so the next lookup re-downloads them."""
+    ids = [m for m in match_ids if m]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" * len(ids))
+    cur = conn.execute(
+        f"DELETE FROM match_cache WHERE match_id IN ({placeholders})",
+        ids,
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)
+
+
 def known_match_ids(conn: sqlite3.Connection, puuid: str) -> set[str]:
     """Match IDs we do not need to re-fetch.
 

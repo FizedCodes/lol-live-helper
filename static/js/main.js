@@ -60,31 +60,82 @@ async function refreshKeyPill() {
       pill.textContent = "Key expired";
       pill.className = "pill bad";
     } else if (s.valid === true) {
-      pill.textContent = "API key OK";
+      pill.textContent = s.source === "session" ? "Session key OK" : "API key OK";
       pill.className = "pill ok";
     } else {
       pill.textContent = "Key: unknown";
       pill.className = "pill idle";
     }
+    return s;
   } catch {
     pill.textContent = "Key: unknown";
     pill.className = "pill idle";
+    return null;
   }
 }
 
-$("save-key").addEventListener("click", async () => {
-  $("key-status").textContent = "Validating with Riot…";
-  $("save-key").disabled = true;
+function describeKeyStatus(s) {
+  if (!s || !s.configured) {
+    return "No key yet — paste one above for this session, or set RIOT_API_KEY in .env.";
+  }
+  const where = s.source === "session" ? "session (memory only)" : ".env";
+  if (s.valid === false) {
+    return `Key rejected by Riot (expired?). Paste a fresh one for this session, or update .env.`;
+  }
+  if (s.valid === true) {
+    return `✓ Key OK (${where}).`;
+  }
+  return `Key is set (${where}), but Riot could not be reached just now.`;
+}
+
+$("check-key").addEventListener("click", async () => {
+  $("key-status").textContent = "Checking key…";
+  $("check-key").disabled = true;
   try {
-    const key = $("api-key").value.trim();
-    await post("/api/key", { key });
-    $("api-key").value = key;
-    $("key-status").textContent = "✓ Key accepted and saved.";
-    refreshKeyPill();
+    const s = await refreshKeyPill();
+    $("key-status").textContent = describeKeyStatus(s);
   } catch (e) {
     $("key-status").textContent = e.message;
   } finally {
-    $("save-key").disabled = false;
+    $("check-key").disabled = false;
+  }
+});
+
+$("use-session-key").addEventListener("click", async () => {
+  const input = $("session-api-key");
+  const raw = (input.value || "").trim();
+  if (!raw) {
+    $("key-status").textContent = "Paste a Riot API key first.";
+    return;
+  }
+  $("key-status").textContent = "Checking key with Riot…";
+  $("use-session-key").disabled = true;
+  try {
+    await post("/api/key", { api_key: raw });
+    input.value = ""; // drop from the page DOM after handoff to server memory
+    const s = await refreshKeyPill();
+    $("key-status").textContent = describeKeyStatus(s);
+  } catch (e) {
+    $("key-status").textContent = e.message;
+  } finally {
+    $("use-session-key").disabled = false;
+  }
+});
+
+$("clear-session-key").addEventListener("click", async () => {
+  $("key-status").textContent = "Clearing session key…";
+  $("clear-session-key").disabled = true;
+  try {
+    await api("/api/key", { method: "DELETE" });
+    $("session-api-key").value = "";
+    const s = await refreshKeyPill();
+    $("key-status").textContent = s?.source === "env"
+      ? "Session key cleared. Still using RIOT_API_KEY from .env."
+      : describeKeyStatus(s);
+  } catch (e) {
+    $("key-status").textContent = e.message;
+  } finally {
+    $("clear-session-key").disabled = false;
   }
 });
 
@@ -94,7 +145,6 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   if (cfg.game_name) $("game-name").value = cfg.game_name;
   if (cfg.tag_line) $("tag-line").value = cfg.tag_line;
-  if (cfg.api_key) $("api-key").value = cfg.api_key;
 }
 
 $("save-config").addEventListener("click", async () => {
@@ -276,9 +326,51 @@ function paintPlayerCard(p) {
   if (more) {
     more.addEventListener("click", () => loadMoreMatches(p.riot_id));
   }
+  const refreshBtn = box.querySelector("#player-refresh");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Refreshing…";
+      try {
+        await showPlayer(p.riot_id, { refresh: true });
+      } finally {
+        // showPlayer re-paints the card; only restore if the old node is still around
+        if (refreshBtn.isConnected) {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Refresh games";
+        }
+      }
+    });
+  }
+  const clearBtn = box.querySelector("#player-clear-cache");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", async () => {
+      clearBtn.disabled = true;
+      clearBtn.textContent = "Clearing…";
+      try {
+        const matchIds = [
+          ...(p.recent_matches || []).map((m) => m.match_id).filter(Boolean),
+        ];
+        const r = await post("/api/player/cache/clear", {
+          riot_id: p.riot_id,
+          match_ids: matchIds,
+        });
+        $("player-search-status").textContent =
+          `Cache cleared (${r.cleared_matches || 0} games). Re-pulling…`;
+        await showPlayer(p.riot_id, { refresh: true });
+        $("player-search-status").textContent = "";
+      } catch (e) {
+        $("player-search-status").textContent = e.message;
+        if (clearBtn.isConnected) {
+          clearBtn.disabled = false;
+          clearBtn.textContent = "Clear cache";
+        }
+      }
+    });
+  }
 }
 
-async function showPlayer(riotId, { start = 0, append = false } = {}) {
+async function showPlayer(riotId, { start = 0, append = false, refresh = false } = {}) {
   const box = $("player-search-result");
   $("player-search").value = riotId;
 
@@ -298,13 +390,21 @@ async function showPlayer(riotId, { start = 0, append = false } = {}) {
         matches_warning: null,
         has_more: false,
         match_ids_total: 0,
+        next_start: 0,
         from_cache: false,
+        history_days: 30,
       };
 
   if (!append) {
-    lastPlayerLookup = null;
-    box.innerHTML =
-      `<p class="muted">Looking up ${riotId}…</p>${progressBarHtml("Loading…", 0, 0)}`;
+    // Keep ranks card if re-searching same player; don't wipe match list until done
+    // (that wipe made history look like it was fluctuating every search).
+    if (!lastPlayerLookup || lastPlayerLookup.riot_id?.toLowerCase() !== riotId.toLowerCase()) {
+      lastPlayerLookup = null;
+      box.innerHTML =
+        `<p class="muted">Looking up ${riotId}…</p>${progressBarHtml("Loading…", 0, 0)}`;
+    } else {
+      paintProgressKeep(box, "Refreshing last 30 days…", 0, 0);
+    }
   } else {
     const moreBtn = box.querySelector("#player-load-more");
     if (moreBtn) {
@@ -319,27 +419,14 @@ async function showPlayer(riotId, { start = 0, append = false } = {}) {
       if (moreBtn) moreBtn.textContent = `Loading… ${done}/${total || "?"}`;
       return;
     }
-    const bar = progressBarHtml(label, done, total);
-    const head = box.querySelector(".player-card-head");
-    if (!head) {
-      box.innerHTML = `<p class="muted">Looking up ${riotId}…</p>${bar}`;
-      return;
-    }
-    let slot = box.querySelector(".load-progress-slot");
-    if (!slot) {
-      slot = document.createElement("div");
-      slot.className = "load-progress-slot";
-      const matches = box.querySelector(".recent-matches");
-      if (matches) matches.replaceWith(slot);
-      else box.appendChild(slot);
-    }
-    slot.innerHTML = bar;
+    paintProgressKeep(box, label, done, total, riotId);
   };
 
   try {
     let finished = false;
     const q =
-      `/api/player?riot_id=${encodeURIComponent(riotId)}&stream=1&start=${start}&count=20`;
+      `/api/player?riot_id=${encodeURIComponent(riotId)}&stream=1&start=${start}&count=20`
+      + (refresh ? "&refresh=1" : "");
     await streamNdjson(q, (ev) => {
       if (ev.type === "meta") {
         Object.assign(payload, {
@@ -350,26 +437,31 @@ async function showPlayer(riotId, { start = 0, append = false } = {}) {
           summoner_level: ev.summoner_level,
           from_cache: !!ev.from_cache,
           match_ids_total: ev.match_ids_total || 0,
+          history_days: ev.history_days || 30,
         });
         if (!append) {
-          payload.recent_matches = [];
-          payload.smurf = null;
+          // Keep existing matches visible while loading; only clear smurf until done.
+          if (!payload.recent_matches?.length && lastPlayerLookup?.recent_matches?.length) {
+            payload.recent_matches = [...lastPlayerLookup.recent_matches];
+          }
           paintPlayerCard(payload);
-          paintProgress("Loading matches…", 0, 0);
+          paintProgress("Loading matches (last 30 days)…", 0, 0);
         }
       } else if (ev.type === "progress") {
-        paintProgress("Loading matches…", ev.done || 0, ev.total || 0);
+        paintProgress("Loading matches (last 30 days)…", ev.done || 0, ev.total || 0);
       } else if (ev.type === "match") {
-        if (ev.match && !append) payload.recent_matches.push(ev.match);
+        // Don't push piecemeal on first page — wait for done so order stays stable.
       } else if (ev.type === "done") {
         payload.smurf = ev.smurf;
         payload.matches_warning = ev.matches_warning || null;
         payload.has_more = !!ev.has_more;
         payload.match_ids_total = ev.match_ids_total || payload.match_ids_total || 0;
         payload.match_start = ev.match_start || start;
+        payload.next_start = ev.next_start ?? (start + 20);
         payload.from_cache = !!ev.from_cache;
+        payload.history_days = ev.history_days || 30;
         if (append) {
-          const page = ev.page_matches || ev.recent_matches || [];
+          const page = ev.page_matches || [];
           const seen = new Set((payload.recent_matches || []).map((m) => m.match_id));
           for (const m of page) {
             if (m?.match_id && !seen.has(m.match_id)) {
@@ -377,11 +469,9 @@ async function showPlayer(riotId, { start = 0, append = false } = {}) {
               seen.add(m.match_id);
             }
           }
-          payload.recent_matches.sort(
-            (a, b) => (b.played_at || 0) - (a.played_at || 0),
-          );
         } else {
-          payload.recent_matches = ev.recent_matches || payload.recent_matches;
+          // Server returns id-list order for the loaded window — take it as truth.
+          payload.recent_matches = ev.recent_matches || [];
         }
         lastPlayerLookup = payload;
         finished = true;
@@ -407,10 +497,28 @@ async function showPlayer(riotId, { start = 0, append = false } = {}) {
   }
 }
 
+function paintProgressKeep(box, label, done, total, riotId) {
+  const bar = progressBarHtml(label, done, total);
+  const head = box.querySelector(".player-card-head");
+  if (!head) {
+    box.innerHTML = `<p class="muted">Looking up ${riotId || ""}…</p>${bar}`;
+    return;
+  }
+  let slot = box.querySelector(".load-progress-slot");
+  if (!slot) {
+    slot = document.createElement("div");
+    slot.className = "load-progress-slot";
+    const matches = box.querySelector(".recent-matches");
+    if (matches) matches.before(slot);
+    else box.appendChild(slot);
+  }
+  slot.innerHTML = bar;
+}
+
 async function loadMoreMatches(riotId) {
   const p = lastPlayerLookup;
   if (!p) return;
-  const start = (p.recent_matches || []).length;
+  const start = Number.isFinite(p.next_start) ? p.next_start : (p.recent_matches || []).length;
   await showPlayer(riotId || p.riot_id, { start, append: true });
 }
 

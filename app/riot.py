@@ -30,17 +30,36 @@ def _api_key() -> str:
 
     key = current_api_key()
     if not key:
-        raise RuntimeError("No Riot API key configured. Paste one in the Setup panel on the dashboard.")
+        raise RuntimeError(
+            "No Riot API key configured. Paste one in Setup for this session, "
+            "or set RIOT_API_KEY in .env and restart."
+        )
     return key
 
 
 async def validate_key(key: str, platform: str) -> bool:
-    """Cheap check that a key is alive: the status endpoint costs one request."""
+    """Check that a key is alive via the platform status endpoint.
+
+    Only 401/403 mean "bad key". Rate limits and other errors raise so the
+    Setup Save button does not falsely report a fresh key as rejected.
+    """
     url = f"{platform_host(platform)}/lol/status/v4/platform-data"
+    # Status calls are free of Riot's app rate limit; still space them locally.
     await get_limiter().acquire()
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, headers={"X-Riot-Token": key})
-        return resp.status_code == 200
+    if resp.status_code == 200:
+        return True
+    if resp.status_code in (401, 403):
+        return False
+    if resp.status_code == 429:
+        raise RuntimeError(
+            "Riot rate-limited the key check. Wait a minute and try Save again "
+            "(the new key was not stored yet)."
+        )
+    raise RuntimeError(
+        f"Could not validate the API key (Riot returned {resp.status_code}). Try again in a moment."
+    )
 
 
 def regional_host(region: str) -> str:
@@ -75,7 +94,8 @@ def _check_key_rejection(resp: httpx.Response) -> None:
     if resp.status_code in (401, 403):
         raise RuntimeError(
             "Riot rejected the API key (expired or invalid). Dev keys expire every 24h — "
-            "regenerate at developer.riotgames.com, update .env, and restart the server."
+            "regenerate at developer.riotgames.com, then paste it in Setup (this session) "
+            "or update RIOT_API_KEY in .env and restart."
         )
 
 
@@ -83,7 +103,10 @@ class RiotWebApi:
     def __init__(self, region: str, platform: str | None = None):
         self.host = regional_host(region)
         self.platform = platform_host(platform) if platform else None
-        self.headers = {"X-Riot-Token": _api_key()}
+        # Key is read fresh on every request via _headers() / current_api_key().
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Riot-Token": _api_key()}
 
     async def _get(
         self,
@@ -100,7 +123,7 @@ class RiotWebApi:
             last: httpx.Response | None = None
             for attempt in range(retries):
                 await limiter.acquire()
-                resp = await c.get(url, headers=self.headers, params=params)
+                resp = await c.get(url, headers=self._headers(), params=params)
                 if resp.status_code != 429:
                     return resp
                 last = resp

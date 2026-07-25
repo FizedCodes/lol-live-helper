@@ -1,9 +1,14 @@
-"""App settings. The API key can come from the site (stored in the DB) or from .env."""
+"""App settings. Riot API key is server-only — never returned to the browser or SQLite."""
 from __future__ import annotations
 
 import os
+import re
 
-from app import store
+# Invisible junk that often rides along when copying from the Riot portal.
+_KEY_NOISE = re.compile(r'[\ufeff\u200b\u200c\u200d\xa0"\']+')
+
+# In-process only. Gone when uvicorn exits. Never written to disk.
+_session_api_key: str | None = None
 
 
 def region() -> str:
@@ -36,35 +41,44 @@ def riot_rate_limit_long_window() -> float:
     return float(os.environ.get("RIOT_RATE_LIMIT_LONG_WINDOW", "120"))
 
 
-def _env_key() -> str | None:
-    key = os.environ.get("RIOT_API_KEY", "").strip()
+def normalize_api_key(raw: str) -> str:
+    """Strip whitespace / copy-paste noise so a portal key is not rejected."""
+    return _KEY_NOISE.sub("", (raw or "").strip()).strip()
+
+
+def _env_api_key() -> str | None:
+    key = normalize_api_key(os.environ.get("RIOT_API_KEY", ""))
     if not key or key.startswith("RGAPI-your"):
         return None
     return key
 
 
+def set_session_api_key(raw: str) -> str:
+    """Store a key in memory for this server process only."""
+    global _session_api_key
+    key = normalize_api_key(raw)
+    if not key or key.startswith("RGAPI-your"):
+        raise RuntimeError("Paste a real Riot API key (starts with RGAPI-).")
+    _session_api_key = key
+    return key
+
+
+def clear_session_api_key() -> None:
+    """Drop the in-memory session key (env key, if any, still applies)."""
+    global _session_api_key
+    _session_api_key = None
+
+
 def current_api_key() -> str | None:
-    """The key saved from the site wins; .env is the fallback."""
-    conn = store.connect()
-    try:
-        return store.get_meta(conn, "api_key") or _env_key()
-    finally:
-        conn.close()
+    """Session memory first, then ``RIOT_API_KEY`` from env. Never SQLite."""
+    if _session_api_key:
+        return _session_api_key
+    return _env_api_key()
 
 
 def key_source() -> str | None:
-    conn = store.connect()
-    try:
-        if store.get_meta(conn, "api_key"):
-            return "site"
-    finally:
-        conn.close()
-    return "env" if _env_key() else None
-
-
-def save_api_key(key: str) -> None:
-    conn = store.connect()
-    try:
-        store.set_meta(conn, "api_key", key.strip())
-    finally:
-        conn.close()
+    if _session_api_key:
+        return "session"
+    if _env_api_key():
+        return "env"
+    return None

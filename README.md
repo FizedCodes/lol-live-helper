@@ -1,5 +1,7 @@
 # LoL Live Helper
 
+**Version:** 0.8.0 (see `VERSION`)
+
 A local dashboard that shows your matchup context **while you're in a League of Legends game**: for every enemy champion it shows your personal win rate against them (overall, as a lane opponent, and on your current champion), and gives a simple call — **Push hard**, **Even**, or **Play safe**.
 
 ## How it works
@@ -12,14 +14,16 @@ A local dashboard that shows your matchup context **while you're in a League of 
 ```
 app/                    Python backend (FastAPI)
   main.py               wiring only: creates the app, mounts routes + static files
-  routes_config.py      /api/config + /api/key endpoints (Riot ID, API key)
+  routes_config.py      /api/config + session/env key endpoints (Riot ID; raw key never returned)
+  routes_riot.py        /api/riot/* thin wrappers (account, league, match, …)
   routes_sync.py        /api/sync + /api/stats (match history)
   routes_live.py        /api/live (the in-game view)
   analysis.py           play safe / push hard verdict rules (tune thresholds here)
   ranks.py              League-V4 rank lookups, cached per server run
-  riot.py               HTTP clients for Riot's APIs (live client + web API)
+  riot.py               low-level HTTP clients for Riot's APIs
+  riot_service.py       centralized server-side Riot entry point
   store.py              SQLite persistence and matchup aggregation
-  config.py             settings: env vars + the DB-stored API key
+  config.py             settings (session key in RAM + optional RIOT_API_KEY)
 static/                 Frontend (plain HTML/CSS/JS, no build step)
   index.html            page skeleton: tabs (Live / Builds / Stats / Setup)
   js/main.js            entry point: tab router, event wiring, 10s polling loop
@@ -33,13 +37,18 @@ static/                 Frontend (plain HTML/CSS/JS, no build step)
 
 ## Setup
 
-1. **Get a Riot API key** at [developer.riotgames.com](https://developer.riotgames.com) (dev keys expire every 24h; you can regenerate for free). You can paste it straight into the dashboard's Setup panel — no `.env` needed. Optionally set region defaults:
+1. **Get a Riot API key** at [developer.riotgames.com](https://developer.riotgames.com) (dev keys expire every 24h; free to regenerate). Either:
+   - Paste it in **Setup → Use for this session** (server memory only — gone when you stop the app), or
+   - Put it in `.env` as `RIOT_API_KEY` so it survives restarts.
+
+   Also set region defaults:
 
    ```powershell
    copy .env.example .env
-   # edit RIOT_REGION (americas / europe / asia / sea) and RIOT_PLATFORM (na1, euw1, kr, ...)
+   # edit RIOT_API_KEY (optional), RIOT_REGION (americas / europe / asia / sea), RIOT_PLATFORM (na1, euw1, kr, ...)
    ```
 
+   Restart only needed after changing `.env`. The dashboard never gets the raw key back from the API.
 2. **Install and run:**
 
    ```powershell
@@ -49,7 +58,7 @@ static/                 Frontend (plain HTML/CSS/JS, no build step)
    uvicorn app.main:app --port 8000
    ```
 
-4. Open [http://localhost:8000](http://localhost:8000), enter your Riot ID (name + tagline), and hit **Sync match history**. The first sync takes a few minutes because dev keys are rate-limited to 100 requests per 2 minutes.
+4. Open [http://localhost:8000], enter your Riot ID (name + tagline), and hit **Sync match history**. The first sync takes a few minutes because dev keys are rate-limited to 100 requests per 2 minutes.
 
 5. Queue up. When your game starts, the dashboard flips to the live view automatically (poll every 10 s). Keep it on a second monitor or alt-tab.
 

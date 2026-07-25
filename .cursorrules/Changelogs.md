@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-07-25 09:18 — **v0.8.0** release
+Local companion dashboard milestone: Riot calls go through a server-side service;
+API key is session-memory and/or `.env` (never SQLite, never returned to the browser);
+Player refresh/clear-cache + fresher match lists; postgame / habits / builds already in tree.
+
+## 2026-07-25 09:15 — Session API key (memory only, no save)
+- Setup has a paste box again: **Use for this session** keeps the key in server
+  RAM only — not SQLite, not `.env`, gone when you stop uvicorn.
+- Optional `.env` `RIOT_API_KEY` still works and survives restarts; session key
+  wins while set. **Clear session key** drops memory and falls back to env.
+- `/api/config` still never returns the raw key; input is cleared after handoff.
+
+## 2026-07-25 08:05 — Riot API key is server-only + central service
+- API key lives only in server `.env` (`RIOT_API_KEY`). Setup no longer pastes/saves a key;
+  the browser never receives the raw key from `/api/config`.
+- New `riot_service.py` is the single entry for Riot ops; thin `GET /api/riot/*` endpoints
+  wrap the same service. Feature tabs still use `/api/live`, `/api/sync`, `/api/player`, etc.
+- Review / rollback notes: `.cursorrules/RiotApiRefactor-Review.md`.
+- **Migration:** if you only had a Setup-saved key, copy it into `.env` and restart.
+
+## 2026-07-24 22:55 — Player Refresh games + Clear cache
+- Player card actions: **Refresh games** (full re-pull from Riot) and **Clear cache**
+  (wipes local memory + SQLite match blobs for that player, then re-pulls).
+- Use after you finish a game so the new match shows up without waiting out the
+  old cache. Close renamed so it isn’t confused with Clear cache.
+
+## 2026-07-24 22:52 — Player re-search picks up new games
+- Searching a player again **re-checks the match list** (so a game you just finished
+  shows up). Ranks still stay warm ~5 min to spare the API key. Load more is unchanged.
+- Pill text now says “cached ranks” so it’s clear the match list is not frozen.
+
+## 2026-07-24 22:05 — API key Save no longer sticks on a stale token
+- **Setup → Save key**: cleans copy-paste junk, only treats Riot 401/403 as a
+  bad key (rate limits / glitches no longer look like “rejected”), and confirms
+  the new key actually landed in the DB.
+- **Live requests**: Riot calls re-read the key every time (no frozen header from
+  when Sync/Player started), so a mid-session key swap is used immediately.
+- Error text no longer tells you to edit `.env` and restart for a site-saved key.
+
+## 2026-07-24 19:58 — Player match history stability (last 30 days)
+- **Scope**: Player lookup only indexes games from the **last 30 days** (month-old
+  and older are dropped, not mixed in).
+- **Stability**: list stays in Riot newest-first order; Load more uses `next_start`
+  (id index) instead of “how many rows we happened to get.”
+- **UI**: re-search no longer clears the match list mid-load (that looked like
+  history jumping around). Label shows “last 30 days.”
+
 ## 2026-07-23 17:40 — Postgame is its own lasting tab
 - **New Postgame tab**: synced games stay in a scrollable history — click any
   game for grades / graphs / buy order. Reports + timelines save locally so

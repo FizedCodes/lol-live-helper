@@ -29,6 +29,15 @@ header {
 
 h1 { font-size: 20px; letter-spacing: 1px; text-transform: uppercase; }
 h1 span { color: var(--gold); }
+h1 .ver {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  color: var(--muted);
+  vertical-align: middle;
+}
 
 .pill {
   padding: 6px 14px;
@@ -1031,10 +1040,18 @@ button.ghost {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   margin-bottom: 8px;
   margin-top: 16px;
 }
 .player-card-head h3 { font-size: 16px; }
+.player-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.player-card-actions .ghost { font-size: 12px; padding: 4px 10px; }
 .player-rank-cards { grid-template-columns: 1fr 1fr; }
 .wr-card .sub { margin-top: 4px; font-size: 12px; }
 

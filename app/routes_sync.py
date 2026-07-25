@@ -8,7 +8,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app import config, riot, store
+from app import config, riot_service, store
+from app.riot import RiotWebApi
 
 router = APIRouter(prefix="/api")
 
@@ -17,7 +18,7 @@ def _ndjson(obj: dict) -> str:
     return json.dumps(obj, separators=(",", ":")) + "\n"
 
 
-async def _get_match_cached(api: riot.RiotWebApi, client: httpx.AsyncClient, conn, match_id: str):
+async def _get_match_cached(api: RiotWebApi, client: httpx.AsyncClient, conn, match_id: str):
     """SQLite match_cache first; Riot only on miss. Returns None if rate-limited."""
     hit = store.get_match_payload(conn, match_id)
     if hit is not None:
@@ -40,7 +41,7 @@ async def sync_matches(
         if not puuid:
             raise HTTPException(status_code=400, detail="Set your Riot ID first.")
         try:
-            api = riot.RiotWebApi(config.region())
+            api = riot_service.web_api(platform=False)
             match_ids = await api.get_match_ids(puuid, config.sync_match_count())
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -77,7 +78,7 @@ async def sync_matches(
             conn.close()
 
 
-async def _sync_stream(conn, api: riot.RiotWebApi, puuid: str, known: set, todo: list[str]):
+async def _sync_stream(conn, api: RiotWebApi, puuid: str, known: set, todo: list[str]):
     stored = 0
     total = len(todo)
     try:
