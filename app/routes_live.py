@@ -13,12 +13,44 @@ router = APIRouter(prefix="/api")
 
 def _scores_of(p: dict) -> dict:
     s = p.get("scores") or {}
-    return {
+    out = {
         "kills": s.get("kills", 0),
         "deaths": s.get("deaths", 0),
         "assists": s.get("assists", 0),
         "cs": s.get("creepScore", 0),
     }
+    # Live Client wardScore — useful for overlay vision pace (you + others).
+    ward = s.get("wardScore")
+    if isinstance(ward, (int, float)):
+        out["ward_score"] = float(ward)
+    return out
+
+
+def _objectives_of(game: dict) -> dict:
+    """Count Live Client eventdata into a compact overlay-friendly summary."""
+    events = (game.get("events") or {}).get("Events") or []
+    counts = {
+        "dragon": 0,
+        "baron": 0,
+        "herald": 0,
+        "tower": 0,
+        "inhibitor": 0,
+        "horde": 0,
+    }
+    name_map = {
+        "DragonKill": "dragon",
+        "BaronKill": "baron",
+        "HeraldKill": "herald",
+        "TowerKill": "tower",
+        "InhibKill": "inhibitor",
+        "InhibitorKill": "inhibitor",
+        "HordeKill": "horde",
+    }
+    for e in events:
+        key = name_map.get(e.get("EventName") or "")
+        if key:
+            counts[key] += 1
+    return counts
 
 
 def _items_of(p: dict) -> list[dict]:
@@ -205,6 +237,7 @@ async def live():
                 "level": (my_live_stats or {}).get("level"),
             },
             "team_kills": team_kills,
+            "objectives": _objectives_of(game),
             "enemies": enemies,
             "allies": allies,
             "result": result,

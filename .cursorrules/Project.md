@@ -14,9 +14,18 @@ A **local web dashboard** (Windows, opened in a browser at `http://localhost:800
 - **No build step**: plain HTML/CSS/JS frontend with ES modules; FastAPI + SQLite backend. Keep it that way unless the user asks.
 
 ## Running it
+**Normal:** double-click `lolhelp.cmd` → **Electron launcher** (starts server + overlay HUD).
+One-time: `cd overlay-app && npm install`. Re-running auto-stops leftovers on `:8000`.
+Closing the launcher quits everything.
+Use the launcher **Updates** panel to pull from GitHub and restart without a full manual reopen (needs a clean git working tree).
+
+**Dev server only:**
 ```powershell
 .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 ```
+Full desktop: `cd overlay-app && npx electron .`  
+Legacy overlay-only fallback: `.venv\Scripts\python.exe overlay_shell.py`
+
 Dependencies are already installed in `.venv`. Data lives in `data/helper.db` (SQLite, gitignored).
 
 ## Gotchas an agent must know

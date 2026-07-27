@@ -18,7 +18,9 @@ Postgame death map → Match-V5 timeline (after the game; paid-friendly)
 ## A. Ship blockers for “1.0” (local product)
 
 - [ ] **prod launcher** — `lolhelp.exe` or at least `lolhelp.cmd` so nobody types uvicorn
+  <!-- done (partial 2026-07-25): Electron launcher in overlay-app/ (server + overlay + module toggles); lolhelp.cmd boots it; real .exe packaging next -->
 - [ ] **auto-update** — check GitHub releases / version file so friends don’t rebuild from source
+  <!-- next: wire into launcher after portable exe zip -->
 - [ ] **first-run setup** — Riot ID + point to `.env` key in plain language; fail soft if key missing (Live/overlay still works)
 - [ ] **Riot key pain** — document daily regen; later: personal key stays on user’s machine and only optional “upload for cloud Sync”
   <!-- done (partial): Setup session paste = memory-only for this uvicorn run; optional .env for persistence; never SQLite -->
@@ -30,19 +32,33 @@ Postgame death map → Match-V5 timeline (after the game; paid-friendly)
 
 ### Overlay shell
 - [ ] **Windows overlay shell** — always-on-top, click-through toggle, hotkey show/hide, survives alt-tab into League
+  <!-- done (partial 2026-07-25): Electron launcher+overlay; setIgnoreMouseEvents; module toggles stub for paid; pywebview = fallback -->
 - [ ] **honest labels** — spell/camp timers stay click/schedule-based; never fake auto-detection Riot doesn’t give
 - [ ] **overlay camp timers on map** — browser camps dock exists; real Windows overlay map still later
 
 ### Overlay v1 live stats (from Live Client `:2999` + Sync baselines)
 - [ ] **matchup win rate + verdict** — personal WR vs lane opponent (SQLite), already on Live today → surface on overlay
+  <!-- done (2026-07-25): free overlay shows laner WR + verdict -->
 - [ ] **KDA** — live kills / deaths / assists
+  <!-- done (2026-07-25): on free overlay -->
 - [ ] **farm** — CS and CS/min from `creepScore` + `gameTime`
+  <!-- done (2026-07-25): on free overlay -->
 - [ ] **gold per minute** — your gold / game minutes (you; Live Client is richest for active player)
+  <!-- done (2026-07-25): on free overlay -->
 - [ ] **kill participation** — (K+A) / ally team kills this game
+  <!-- done (2026-07-25): on free overlay -->
 - [ ] **objectives** — ticks from Live `eventdata` (dragon, baron, towers, etc.)
+  <!-- done (2026-07-25): /api/live objectives + overlay line -->
+
+- [ ] **rank grind tracker** — wins till next rank, LP bar, last 5 W/L champ icons, session W-L / WR / net LP, optional grind timer
+  <!-- want (ref 2026-07-25): Porofessor-style panel — “N wins till X”, Bronze II + LP badge + % bar, LAST 5 games, SESSION / WIN RATE / NET LP, grind clock + games; needs League-V4 + Match-V5 after ranked games, not Live Client alone -->
+
 - [ ] **vision / ward score** — player ward score pace (Live); not full end-game vision score until Match-V5
+  <!-- done (partial 2026-07-25): ward_score on scores + overlay; pace coach later -->
 - [ ] **summoner spell tracker** — Flash/Heal/etc. click-to-arm CDs (see `.cursorrules/SpellTracker.md`)
+  <!-- paid / later overlay QoL -->
 - [ ] **camp / objective strip** — reuse camps schedule logic on the overlay
+  <!-- paid / later overlay QoL -->
 
 ### Live habits (possible — sample Live Client over game clock)
 Stats habits today are **end-of-sync averages only**. Live habits *can* timestamp when you fall behind — Riot gives continuous CS / KDA / ward score / events.
@@ -86,6 +102,8 @@ Timeline is **already fetched** for buy order (`timeline_cache` + `postgame.py`)
 - [ ] teammate-shared spell timers
 - [ ] ultimate trackers
 
+
+
 ---
 
 ## Suggested release order
@@ -93,8 +111,8 @@ Timeline is **already fetched** for buy order (`timeline_cache` + `postgame.py`)
 | Phase | Name | Outcome |
 |-------|------|---------|
 | **0.8** | Local companion | Dashboard tabs + Riot service + session/env key <!-- shipped 2026-07-25 --> |
-| **0.9** | Polish local app | Launcher, kill op.gg text, UI declutter, spell click-timers in browser Live |
-| **1.0** | Free overlay | Exe + overlay live stats (WR/KDA/CS/GPM/KP/objectives/vision) + live habit nudges |
+| **0.9** | Polish local app | Launcher, kill op.gg text, UI declutter, spell click-timers in browser Live <!-- partial 2026-07-25: lolhelp.cmd + free overlay shell; op.gg/UI/spells still open --> |
+| **1.0** | Free overlay | Exe + overlay live stats (WR/KDA/CS/GPM/KP/objectives/vision) + live habit nudges <!-- stats HUD started 2026-07-25; habits + exe still open --> |
 | **1.1** | Habit depth | Timestamped habit windows saved; Stats/Postgame show “when you usually fail” |
 | **1.2** | Death map | Match-V5 timeline death coords on Postgame (paid-friendly) |
 | **1.5** | Optional cloud | Hosted site; client transmit opt-in; Sync/Player on server |

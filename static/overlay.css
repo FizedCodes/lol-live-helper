@@ -1,0 +1,212 @@
+/* HUD fills the whole window — empty WebView margins render as solid white. */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  background-color: rgba(0, 0, 0, 0) !important;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #e8ecf5;
+  user-select: none;
+}
+
+.hud {
+  --hud-op: 0.22;
+  margin: 0;
+  padding: 12px 14px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(8, 12, 22, var(--hud-op));
+  border: 1px solid rgba(200, 170, 110, calc(0.15 + var(--hud-op) * 0.45));
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  /* Electron frameless: drag the panel in grab mode */
+  -webkit-app-region: drag;
+}
+
+.opacity-row,
+.opacity-row input,
+.hint,
+.mouse-mode {
+  -webkit-app-region: no-drag;
+}
+
+.you-name,
+.opp-name,
+.clock,
+.stat .value,
+.pill,
+.verdict,
+.wr,
+.obj,
+.obj strong {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 10px rgba(0, 0, 0, 0.75);
+}
+
+.pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #b8c0d4;
+  margin-bottom: 8px;
+}
+.pill.ingame { color: #3ddc84; }
+
+.you-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.you-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+.clock {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: #c8aa6e;
+  font-weight: 600;
+}
+
+.opp-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.opp-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+.wr {
+  font-size: 13px;
+  color: #c0c8da;
+  margin-bottom: 10px;
+}
+.wr .good { color: #3ddc84; font-weight: 700; }
+.wr .bad { color: #ff5c5c; font-weight: 700; }
+
+.verdict {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, calc(var(--hud-op) * 0.6));
+  white-space: nowrap;
+}
+.verdict.favored { color: #3ddc84; border-color: #3ddc84; }
+.verdict.unfavored { color: #ff5c5c; border-color: #ff5c5c; }
+.verdict.even { color: #c8aa6e; border-color: #c8aa6e; }
+.verdict.unknown { color: #b8c0d4; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.stat {
+  background: rgba(12, 18, 32, calc(var(--hud-op) * 0.85));
+  border: 1px solid rgba(255, 255, 255, calc(0.06 + var(--hud-op) * 0.2));
+  border-radius: 8px;
+  padding: 7px 5px;
+  text-align: center;
+}
+.stat .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #b0b8cc;
+  margin-bottom: 3px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.stat .value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stat .sub {
+  font-size: 11px;
+  color: #b0b8cc;
+  font-weight: 600;
+}
+
+.obj {
+  font-size: 12px;
+  color: #c0c8da;
+  line-height: 1.4;
+}
+.obj strong { color: #f0f3fa; font-weight: 700; }
+
+.opacity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 10px;
+  color: #9aa3b8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.opacity-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  accent-color: #c8aa6e;
+  cursor: pointer;
+}
+#opacityVal {
+  width: 2.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #c8aa6e;
+  font-weight: 600;
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #7a8498;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.mouse-mode {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #8b96ad;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+html[data-mouse="grab"] .hud {
+  outline: 2px solid rgba(200, 170, 110, 0.95);
+  outline-offset: -2px;
+}
+html[data-mouse="grab"] .mouse-mode {
+  color: #c8aa6e;
+}
+html[data-mouse="through"] .mouse-mode {
+  color: #6f7a90;
+}
+
+.hud.idle .stats,
+.hud.idle .obj {
+  display: none !important;
+}

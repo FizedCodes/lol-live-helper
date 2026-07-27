@@ -1,6 +1,9 @@
+node_modules/
+overlay-app/node_modules/
 .env
 .venv/
 __pycache__/
 data/
 *.pyc
 .cursor/
+.cursorrules/*

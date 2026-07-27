@@ -1,0 +1,14 @@
+{
+  "name": "lol-live-helper",
+  "version": "0.9.3",
+  "private": true,
+  "description": "LoL Live Helper desktop launcher + overlay (no Overwolf)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}

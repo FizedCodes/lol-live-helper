@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en" data-mouse="through">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LoL Live Helper Overlay</title>
+  <link rel="stylesheet" href="/static/overlay.css" />
+</head>
+<body>
+  <div id="hud" class="hud idle">
+    <div class="pill" id="status">Waiting for game…</div>
+    <div id="matchup"></div>
+    <div class="stats" id="stats" hidden></div>
+    <div class="obj" id="obj" hidden></div>
+    <label class="opacity-row" title="Ctrl+Shift+I first so the slider can receive mouse">
+      <span>Opacity</span>
+      <input type="range" id="opacity" min="5" max="90" step="1" value="22" />
+      <span id="opacityVal">22%</span>
+    </label>
+    <div class="mouse-mode" id="mouseMode">play-through</div>
+    <div class="hint">Ctrl+Shift+O hide · Ctrl+Shift+I grab / play-through</div>
+  </div>
+  <script type="module" src="/static/js/overlay.js"></script>
+</body>
+</html>

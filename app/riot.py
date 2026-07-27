@@ -80,9 +80,12 @@ async def fetch_live_game() -> dict | None:
     """Return live game data from the League client, or None when not in a game.
 
     The client serves this on localhost with a self-signed cert, hence verify=False.
+    Connect timeout is short so /api/live stays snappy when League isn't running
+    (otherwise every poll waits the full request timeout on a closed :2999).
     """
     try:
-        async with httpx.AsyncClient(verify=False, timeout=3.0) as client:
+        timeout = httpx.Timeout(1.5, connect=0.4)
+        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
             resp = await client.get(LIVE_CLIENT_URL)
             resp.raise_for_status()
             return resp.json()

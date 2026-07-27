@@ -38,6 +38,12 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/overlay")
+async def overlay():
+    """Free one-monitor live-stats HUD (opened by overlay_shell.py)."""
+    return FileResponse(STATIC_DIR / "overlay.html")
+
+
 app.include_router(routes_config.router)
 app.include_router(routes_sync.router)
 app.include_router(routes_live.router)

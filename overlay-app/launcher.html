@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>LoL Live Helper</title>
+  <link rel="stylesheet" href="launcher.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <h1>LoL Live Helper</h1>
+        <p class="tag">Your launcher — no Overwolf</p>
+      </div>
+      <div class="version" id="version">…</div>
+    </header>
+
+    <section class="status-card" id="statusCard">
+      <div class="row">
+        <span class="dot" id="serverDot"></span>
+        <div>
+          <div class="label">Server</div>
+          <div class="value" id="serverText">Starting…</div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="dot" id="liveDot"></span>
+        <div>
+          <div class="label">Live Client</div>
+          <div class="value" id="liveText">—</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Overlay</h2>
+      <label class="toggle">
+        <input type="checkbox" id="overlayVisible" checked />
+        <span>Show overlay HUD</span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="clickThrough" checked />
+        <span>Play-through (clicks go to League)</span>
+      </label>
+      <p class="hint">Hotkeys still work: <kbd>Ctrl+Shift+O</kbd> show/hide · <kbd>Ctrl+Shift+I</kbd> grab / play-through</p>
+    </section>
+
+    <section class="panel">
+      <h2>Modules</h2>
+      <p class="hint muted">What the in-game HUD shows. Paid unlocks land here later.</p>
+      <label class="toggle">
+        <input type="checkbox" id="modLiveStats" checked />
+        <span>Live stats <em class="badge free">Free</em></span>
+      </label>
+      <label class="toggle locked">
+        <input type="checkbox" id="modRankGrind" disabled />
+        <span>Rank grind tracker <em class="badge soon">Soon</em></span>
+      </label>
+      <label class="toggle locked">
+        <input type="checkbox" id="modHabits" disabled />
+        <span>Live habit coach <em class="badge paid">Paid</em></span>
+      </label>
+    </section>
+
+    <section class="panel" id="updatePanel">
+      <h2>Updates</h2>
+      <div class="row update-row">
+        <span class="dot" id="updateDot"></span>
+        <div>
+          <div class="label">GitHub</div>
+          <div class="value" id="updateText">…</div>
+        </div>
+      </div>
+      <p class="hint" id="updateHint">Pulls the latest code, then restarts the server. Won't overwrite local edits.</p>
+      <div class="update-actions">
+        <button type="button" class="btn" id="btnCheckUpdates">Check for updates</button>
+        <button type="button" class="btn primary" id="btnApplyUpdate" hidden>Update now</button>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button type="button" class="btn primary" id="btnDashboard">Open companion dashboard</button>
+      <button type="button" class="btn" id="btnRestart">Restart server</button>
+      <button type="button" class="btn danger" id="btnQuit">Quit</button>
+    </section>
+
+    <footer class="foot">
+      Closing this window quits the helper and stops the overlay.
+    </footer>
+  </div>
+  <script src="launcher.js"></script>
+</body>
+</html>

@@ -34,6 +34,10 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 ```
 
 ## Frontend (static/)
+- `overlay.html` + `js/overlay.js` + `overlay.css` — free one-monitor HUD (`GET /overlay`).
+- `overlay-app/` — Electron **launcher + overlay** (starts uvicorn, manages HUD);
+  `launcher.html` is the control panel. Legacy fallback: `overlay_shell.py` (pywebview).
+  Companion tabs stay in `index.html`.
 - `index.html` — skeleton: header with tab nav (Live / Builds / Stats / Postgame /
   Player / Setup) + pills (key status, in-game status). Each tab is a `.tab-page`
   section; hash router in main.js shows one at a time (`#live`, `#builds`, `#stats`,
