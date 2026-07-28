@@ -108,13 +108,22 @@ $("use-session-key").addEventListener("click", async () => {
     $("key-status").textContent = "Paste a Riot API key first.";
     return;
   }
+  if (!/RGAPI-/i.test(raw)) {
+    $("key-status").textContent = "That doesn't look like a Riot key (should start with RGAPI-).";
+    return;
+  }
   $("key-status").textContent = "Checking key with Riot…";
   $("use-session-key").disabled = true;
   try {
-    await post("/api/key", { api_key: raw });
+    const result = await post("/api/key", { api_key: raw });
     input.value = ""; // drop from the page DOM after handoff to server memory
-    const s = await refreshKeyPill();
-    $("key-status").textContent = describeKeyStatus(s);
+    // Prefer the save response so we don't immediately re-hit Riot.
+    $("key-status").textContent = describeKeyStatus({
+      configured: true,
+      valid: result.valid === true,
+      source: "session",
+    });
+    await refreshKeyPill();
   } catch (e) {
     $("key-status").textContent = e.message;
   } finally {

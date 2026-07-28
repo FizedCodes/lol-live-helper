@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-27 22:46 — Fix session API key paste not accepting
+- Key check no longer waits behind the Sync rate limiter (that made Setup hang
+  after a big sync and look like the new key was rejected).
+- Paste cleanup is stricter: strips all whitespace / quotes and pulls out the
+  `RGAPI-…` bit if the clipboard also has a label.
+- Key is only kept in memory after Riot accepts it; Setup field is plain text
+  so you can see what you pasted; clearer error text in the UI.
+
 ## 2026-07-27 07:10 — **v0.9.3** Launcher auto-update from GitHub
 - New **Updates** panel in the launcher: Check for updates / Update now.
 - Pulls latest code with `git pull --ff-only`, refreshes pip deps if

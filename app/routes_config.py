@@ -59,7 +59,10 @@ async def set_config(cfg: ConfigIn):
 async def set_key(body: KeyIn):
     """Hold a key in server memory for this process only — never SQLite / .env."""
     try:
-        key = config.set_session_api_key(body.api_key)
+        # Normalize + shape-check first; only store after Riot accepts it.
+        key = config.normalize_api_key(body.api_key)
+        if not key.startswith("RGAPI-") or key.startswith("RGAPI-your") or key == "RGAPI-":
+            raise RuntimeError("Paste a real Riot API key (starts with RGAPI-).")
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
@@ -67,17 +70,17 @@ async def set_key(body: KeyIn):
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Key stored for this session, but Riot could not be reached: {e}",
+            detail=f"Could not reach Riot to check the key: {e}",
         )
     if valid is False:
-        config.clear_session_api_key()
         raise HTTPException(
             status_code=400,
-            detail="Riot rejected that key (expired?). Get a fresh one at developer.riotgames.com.",
+            detail="Riot rejected that key (expired or invalid). Regenerate at developer.riotgames.com and paste the new one.",
         )
+    config.set_session_api_key(key)
     return {
         "ok": True,
-        "valid": valid,
+        "valid": True,
         "source": "session",
         "persisted": False,
     }

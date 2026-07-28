@@ -19,6 +19,11 @@ One-time: `cd overlay-app && npm install`. Re-running auto-stops leftovers on `:
 Closing the launcher quits everything.
 Use the launcher **Updates** panel to pull from GitHub and restart without a full manual reopen (needs a clean git working tree).
 
+**Two-folder workflow (recommended for update testing):**
+- **Dev:** `Projects\lol-live-helper` — edit code here, commit, push.
+- **Play:** `Apps\lol-live-helper` — clean clone; open `lolhelp.cmd` here and use **Update now** to pull what you just pushed.
+Do not develop in the play folder; keep it clean so updates always apply.
+
 **Dev server only:**
 ```powershell
 .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000

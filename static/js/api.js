@@ -1,8 +1,28 @@
 // Thin wrapper over fetch: all backend calls go through here.
+function formatDetail(detail, fallback) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item.msg === "string") return item.msg;
+      return "";
+    }).filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback;
+}
+
 export async function api(path, opts = {}) {
   const resp = await fetch(path, { cache: "no-store", ...opts });
-  const body = await resp.json();
-  if (!resp.ok) throw new Error(body.detail || resp.statusText);
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    throw new Error(formatDetail(body?.detail, resp.statusText || `HTTP ${resp.status}`));
+  }
   return body;
 }
 

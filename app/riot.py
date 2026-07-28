@@ -41,11 +41,12 @@ async def validate_key(key: str, platform: str) -> bool:
     """Check that a key is alive via the platform status endpoint.
 
     Only 401/403 mean "bad key". Rate limits and other errors raise so the
-    Setup Save button does not falsely report a fresh key as rejected.
+    Setup button does not falsely report a fresh key as rejected.
+
+    Does **not** use the shared Sync rate limiter — status is free of Riot's
+    app quota, and blocking key paste behind Sync budget made Setup hang.
     """
     url = f"{platform_host(platform)}/lol/status/v4/platform-data"
-    # Status calls are free of Riot's app rate limit; still space them locally.
-    await get_limiter().acquire()
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, headers={"X-Riot-Token": key})
     if resp.status_code == 200:
@@ -54,8 +55,7 @@ async def validate_key(key: str, platform: str) -> bool:
         return False
     if resp.status_code == 429:
         raise RuntimeError(
-            "Riot rate-limited the key check. Wait a minute and try Save again "
-            "(the new key was not stored yet)."
+            "Riot rate-limited the key check. Wait a minute and try again."
         )
     raise RuntimeError(
         f"Could not validate the API key (Riot returned {resp.status_code}). Try again in a moment."
