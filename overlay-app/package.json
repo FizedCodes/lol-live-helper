@@ -1,6 +1,6 @@
 {
   "name": "lol-live-helper",
-  "version": "0.9.3",
+  "version": "0.9.5",
   "private": true,
   "description": "LoL Live Helper desktop launcher + overlay (no Overwolf)",
   "main": "main.js",

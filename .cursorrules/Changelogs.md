@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-08-15 23:00 — Setup key check + in-game-only live probe
+- **Failed to fetch** on Check key status: the launcher treated a broken `/api/live`
+  (SQLite setup crash) as "server never started" and **killed uvicorn**, so Setup
+  could not reach the helper. Ready-check now uses `/api/health` (no Live Client,
+  no database). `/api/live` no longer 500s if the DB hiccups.
+- **Check key status** uses the key in the paste box (same as **Use for this session**)
+  instead of only checking a leftover server/.env key.
+- No API key: Riot rank lookups stay skipped. Electron only pings Live Client
+  (`/api/live?lite=1`) to detect a match — full overlay/dashboard fetch still
+  runs in game. Out of game that lite call returns quickly with `in_game: false`.
+
+## 2026-08-15 22:55 — **v0.9.5** LP gained/lost on Player lookup
+- Ranked Solo / Flex games on the lookup page can show **+18 LP** / **-16 LP**
+  (or Promo / Promoted) next to WIN/LOSS.
+- Riot's match history has no LP field. We save a rank snapshot whenever we
+  see someone in a live lobby or look them up, then fill LP when exactly one
+  ranked game sits between two snapshots. After a game you played, **Refresh
+  games** on that player is the usual way to get the number.
+- Remakes show 0 LP. First search of a stranger often has no number yet.
+
+## 2026-08-15 22:52 — Launcher console no longer shows garbled hotkey text
+- The black window that opens with `lolhelp.cmd` was printing `play-through Γåö grab`
+  because Windows cmd uses an old character set and couldn't show the `↔` arrow.
+- Hotkey help now uses plain ` <-> ` so it reads correctly.
+
+## 2026-08-09 15:40 — **v0.9.4** Fix Setup key paste when Riot quota is burned
+- Root cause: live rank lookups **retried every poll** on failure (overlay ~2s,
+  Electron ~1s). An expired key burned the 100-req / 2-min budget, so
+  **Use for this session** got Riot 429 → 400 until the window cleared
+  (looked like you had to spam the button).
+- Rank failures now cool down for 90s; cache clears when you paste/clear a key.
+- Setup still saves the session key if Riot is rate-limiting (only real
+  401/403 rejects). Status checks are cached ~45s so the pill doesn't re-hit Riot.
+
+## 2026-07-28 18:16 — Faster Player lookup
+- Cold lookups were pulling match details **one at a time** (~20 Riot round-trips).
+  Now fetches up to **6 matches in parallel** (still under the shared rate limit).
+- Rank / level / match-id list calls overlap on first search.
+- Match-id list no longer re-hits Riot on every re-search — only when older than
+  ~90s, or when you press **Refresh games**.
+
+## 2026-07-28 17:25 — Builds: pick a champ before games + show starters
+- Builds tab has a **champion + role picker** so you can browse shopping lists
+  before queue (no longer waits for live game / last-game data).
+- **Follow live** snaps back to your current or last-game champ; picking
+  someone else switches to preview mode.
+- Each archetype now shows the usual **starter** (Doran's / Dark Seal /
+  World Atlas / jungle pet) in the list and as step 1 of build order.
+
 ## 2026-07-27 22:46 — Fix session API key paste not accepting
 - Key check no longer waits behind the Sync rate limiter (that made Setup hang
   after a big sync and look like the new key was rejected).

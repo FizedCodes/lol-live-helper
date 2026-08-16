@@ -51,7 +51,8 @@ function runPy(args, { timeoutMs = 15000 } = {}) {
 
 const ROOT = path.join(__dirname, "..");
 const OVERLAY_URL = "http://127.0.0.1:8000/overlay";
-const LIVE_URL = "http://127.0.0.1:8000/api/live";
+const LIVE_LITE_URL = "http://127.0.0.1:8000/api/live?lite=1";
+const HEALTH_URL = "http://127.0.0.1:8000/api/health";
 const DASHBOARD_URL = "http://127.0.0.1:8000/";
 const GEOM_PATH = path.join(ROOT, "data", "overlay_geom.json");
 const PREFS_PATH = path.join(ROOT, "data", "launcher_prefs.json");
@@ -321,8 +322,8 @@ function stopServer() {
 async function waitForServer(tries = 40) {
   for (let i = 0; i < tries; i++) {
     try {
-      const { status } = await httpGetJson(LIVE_URL);
-      if (status === 200) return true;
+      const { status, data } = await httpGetJson(HEALTH_URL);
+      if (status === 200 && data && data.ok) return true;
     } catch {
       /* keep waiting */
     }
@@ -464,7 +465,7 @@ async function pollLive() {
     return;
   }
   try {
-    const { data } = await httpGetJson(LIVE_URL);
+    const { data } = await httpGetJson(LIVE_LITE_URL);
     const playing = Boolean(data.in_game) && !data.error;
     setInGame(playing);
   } catch {
@@ -616,7 +617,7 @@ app.whenReady().then(async () => {
 
   console.log("LoL Live Helper launcher ready.");
   console.log("  Ctrl+Shift+O  overlay show/hide");
-  console.log("  Ctrl+Shift+I  play-through ↔ grab");
+  console.log("  Ctrl+Shift+I  play-through <-> grab");
 });
 
 app.on("will-quit", () => {

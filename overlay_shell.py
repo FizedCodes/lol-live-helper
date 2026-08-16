@@ -462,7 +462,7 @@ def main() -> int:
 
     print("Floating HUD overlay.")
     print("  Ctrl+Shift+O  show/hide (stays up out of game for editing)")
-    print("  Ctrl+Shift+I  play-through (clicks go to League)  ↔  grab (gold outline)")
+    print("  Ctrl+Shift+I  play-through (clicks go to League)  <->  grab (gold outline)")
     print("  Note: Prefer Electron host via lolhelp.cmd when overlay-app is installed.")
     webview.start()
     return 0

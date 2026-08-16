@@ -9,6 +9,7 @@ Wiring only — the real logic lives in:
   routes_postgame.py after-match report
   analysis.py       play safe / push hard verdict rules
   ranks.py          League-V4 rank lookups (cached)
+  lp.py             ranked LP gain/loss from stored rank snapshots
   postgame.py       grades, opponent compare, item buy order
   riot.py           low-level HTTP clients for Riot's APIs
   riot_service.py   centralized server-side Riot API entry point
@@ -31,6 +32,12 @@ load_dotenv()
 app = FastAPI(title="lol-live-helper")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+@app.get("/api/health")
+async def health():
+    """Cheap liveness probe — no Live Client, no SQLite, no Riot."""
+    return {"ok": True}
 
 
 @app.get("/")

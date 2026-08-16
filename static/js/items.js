@@ -48,6 +48,11 @@ export function getRune(id) { return runeById[Number(id)] || null; }
 // Champion catalog entry (info scores, tags) by display name from the live client.
 export function getChampion(name) { return champByName[name] || null; }
 
+/** Sorted display names from Data Dragon (empty until `ready` resolves). */
+export function allChampions() {
+  return Object.keys(champByName).sort((a, b) => a.localeCompare(b));
+}
+
 export function itemGold(id) {
   const it = getItem(id);
   return it && it.gold ? it.gold.total : 0;

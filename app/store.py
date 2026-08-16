@@ -176,6 +176,7 @@ def connect() -> sqlite3.Connection:
         "puuid TEXT NOT NULL, match_id TEXT NOT NULL, payload TEXT NOT NULL, "
         "cached_at INTEGER NOT NULL, PRIMARY KEY (puuid, match_id))"
     )
+    _ensure_rank_snapshots(conn)
     conn.commit()
     return conn
 
@@ -214,6 +215,144 @@ def put_match_payload(conn: sqlite3.Connection, match_id: str, payload: dict) ->
         (match_id, json.dumps(payload), int(time.time())),
     )
     conn.commit()
+
+
+RANK_SNAPSHOT_QUEUES = ("RANKED_SOLO_5x5", "RANKED_FLEX_SR")
+_RANK_SNAPSHOT_KEEP_SEC = 90 * 86400
+
+
+def _ensure_rank_snapshots(conn: sqlite3.Connection) -> None:
+    """Create (or rebuild) the table used to compute ranked LP deltas."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(rank_snapshots)")}
+    if cols and "queue" not in cols:
+        conn.execute("DROP TABLE IF EXISTS rank_snapshots")
+        cols = set()
+    if cols:
+        return
+    conn.execute(
+        "CREATE TABLE rank_snapshots ("
+        "id INTEGER PRIMARY KEY, "
+        "puuid TEXT NOT NULL, "
+        "queue TEXT NOT NULL, "
+        "tier TEXT, "
+        "division TEXT, "
+        "lp INTEGER NOT NULL, "
+        "wins INTEGER NOT NULL, "
+        "losses INTEGER NOT NULL, "
+        "mini_series TEXT, "
+        "captured_at INTEGER NOT NULL)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rank_snapshots_puuid_queue "
+        "ON rank_snapshots (puuid, queue, captured_at)"
+    )
+
+
+def save_league_entries(
+    conn: sqlite3.Connection,
+    puuid: str,
+    entries: list[dict] | None,
+    *,
+    captured_at: int | None = None,
+) -> int:
+    """Persist solo/flex League-V4 rows when the rank state changed.
+
+    Identical consecutive states are skipped so an in-game snapshot keeps its
+    earlier timestamp (that's the pre-game LP).
+    """
+    if not puuid:
+        return 0
+    now = captured_at if captured_at is not None else int(time.time())
+    inserted = 0
+    for entry in entries or []:
+        if save_rank_snapshot(conn, puuid, entry, captured_at=now):
+            inserted += 1
+    if inserted:
+        cutoff = now - _RANK_SNAPSHOT_KEEP_SEC
+        conn.execute(
+            "DELETE FROM rank_snapshots WHERE puuid = ? AND captured_at < ?",
+            (puuid, cutoff),
+        )
+        conn.commit()
+    return inserted
+
+
+def save_rank_snapshot(
+    conn: sqlite3.Connection,
+    puuid: str,
+    entry: dict,
+    *,
+    captured_at: int | None = None,
+    commit: bool = False,
+) -> bool:
+    """Insert one snapshot. Returns True if a new row was written."""
+    queue = entry.get("queueType")
+    if not puuid or queue not in RANK_SNAPSHOT_QUEUES:
+        return False
+    now = captured_at if captured_at is not None else int(time.time())
+    tier = (entry.get("tier") or "").upper() or None
+    division = entry.get("rank") or None
+    lp = int(entry.get("leaguePoints") or 0)
+    wins = int(entry.get("wins") or 0)
+    losses = int(entry.get("losses") or 0)
+    mini = entry.get("miniSeries")
+    mini_json = json.dumps(mini) if mini else None
+
+    last = conn.execute(
+        "SELECT tier, division, lp, wins, losses FROM rank_snapshots "
+        "WHERE puuid = ? AND queue = ? ORDER BY captured_at DESC, id DESC LIMIT 1",
+        (puuid, queue),
+    ).fetchone()
+    if last is not None and (
+        (last["tier"] or None) == tier
+        and (last["division"] or None) == division
+        and int(last["lp"]) == lp
+        and int(last["wins"]) == wins
+        and int(last["losses"]) == losses
+    ):
+        return False
+
+    conn.execute(
+        "INSERT INTO rank_snapshots "
+        "(puuid, queue, tier, division, lp, wins, losses, mini_series, captured_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (puuid, queue, tier, division, lp, wins, losses, mini_json, now),
+    )
+    if commit:
+        conn.commit()
+    return True
+
+
+def list_rank_snapshots(conn: sqlite3.Connection, puuid: str, queue: str) -> list[dict]:
+    """Oldest-first snapshots for one queue (solo or flex)."""
+    rows = conn.execute(
+        "SELECT queue, tier, division, lp, wins, losses, mini_series, captured_at "
+        "FROM rank_snapshots WHERE puuid = ? AND queue = ? "
+        "ORDER BY captured_at ASC, id ASC",
+        (puuid, queue),
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        mini = None
+        raw = row["mini_series"]
+        if raw:
+            try:
+                mini = json.loads(raw)
+            except json.JSONDecodeError:
+                mini = None
+        out.append(
+            {
+                "queue": row["queue"],
+                "tier": row["tier"],
+                "division": row["division"],
+                "lp": int(row["lp"]),
+                "wins": int(row["wins"]),
+                "losses": int(row["losses"]),
+                "mini_series": mini,
+                "captured_at": int(row["captured_at"]),
+            }
+        )
+    return out
 
 
 def delete_match_payloads(conn: sqlite3.Connection, match_ids: list[str]) -> int:

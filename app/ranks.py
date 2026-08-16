@@ -2,18 +2,31 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 
 from app import riot_service
 
-# Ranks don't change mid-game, so cache lookups for the server's lifetime
+# Ranks don't change mid-game, so cache lookups for the server's lifetime.
+# Failures must be cached too — otherwise every /api/live poll (overlay ~2s,
+# Electron ~1s) re-hammers Riot with an expired key and burns the 100/2min budget
+# before Setup can validate a fresh paste.
 _cache: dict[str, dict | None] = {}
+_fail_until: dict[str, float] = {}
+_FAIL_TTL_S = 90.0
 
 
 def cache_rank(riot_id: str, rank: dict | None) -> None:
     """Seed the cache (e.g. after a manual player lookup)."""
     _cache[riot_id] = rank
+    _fail_until.pop(riot_id, None)
+
+
+def clear_cache() -> None:
+    """Drop all cached ranks (call when the API key changes)."""
+    _cache.clear()
+    _fail_until.clear()
 
 
 async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
@@ -21,9 +34,14 @@ async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
     if not riot_service.has_api_key():
         return {}  # no API key: skip ranks, the rest of the live view still works
 
+    now = time.monotonic()
+
     async def one(client: httpx.AsyncClient, rid: str) -> tuple[str, dict | None]:
         if rid in _cache:
             return rid, _cache[rid]
+        until = _fail_until.get(rid)
+        if until is not None and now < until:
+            return rid, None
         try:
             name, tag = rid.split("#", 1)
             # Shared Riot rate limiter spaces these out; gather just pipelines the waits.
@@ -43,8 +61,10 @@ async def fetch_ranks(riot_ids: list[str]) -> dict[str, dict | None]:
                 else {"tier": None}  # verified player, just unranked
             )
         except Exception:
-            return rid, None  # lookup failed (rate limit, expired key, ...): show nothing
+            _fail_until[rid] = time.monotonic() + _FAIL_TTL_S
+            return rid, None
         _cache[rid] = rank
+        _fail_until.pop(rid, None)
         return rid, rank
 
     valid = [r for r in riot_ids if r and "#" in r]

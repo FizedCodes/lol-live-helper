@@ -6,10 +6,9 @@ import time
 import urllib.error
 import urllib.request
 
-URL = "http://127.0.0.1:8000/api/live"
-# /api/live probes Live Client :2999 first; when League is closed that used to take ~3s.
-# Keep HTTP timeout above that worst case so the launcher doesn't false-fail.
-TIMEOUT_S = 8.0
+URL = "http://127.0.0.1:8000/api/health"
+# Health does not probe Live Client :2999, so a short timeout is enough.
+TIMEOUT_S = 2.0
 TRIES = 40
 DELAY = 0.5
 

@@ -131,4 +131,5 @@ Timeline is **already fetched** for buy order (`timeline_cache` + `postgame.py`)
 - Match-V5 timeline fetch + cache — *used for item buy order only so far*
 - Camps SR minimap pull-up (schedule, not real kill tracking)
 - Player lookup last-30-days + Refresh / Clear cache
+  <!-- done (2026-08-15): ranked LP gain/loss on match rows when we have before/after rank snapshots -->
 - Riot API key server-only: Setup session paste (RAM) and/or `RIOT_API_KEY` in `.env` (see `.cursorrules/RiotApiRefactor.md`)

@@ -147,17 +147,34 @@ def _runes_of(p: dict, *, full: dict | None = None) -> dict | None:
     }
 
 
-@router.get("/live")
-async def live():
-    game = await riot_service.fetch_live_game()
-    if game is None:
+def _read_last_game() -> dict | None:
+    """Last-game snapshot from SQLite. Never raises — live view must stay up."""
+    try:
         conn = store.connect()
         try:
             puuid = store.get_meta(conn, "puuid")
             last = store.get_meta(conn, f"last_game:{puuid}") if puuid else None
-            return {"in_game": False, "last_game": json.loads(last) if last else None}
         finally:
             conn.close()
+        return json.loads(last) if last else None
+    except Exception:
+        return None
+
+
+@router.get("/live")
+async def live(lite: bool = False):
+    """Live Client snapshot.
+
+    ``lite=1`` is the in-game detector (Electron poll): Live Client only, no
+    SQLite and no Riot. Full payload (matchups / ranks) is for the dashboard
+    and overlay HUD. Ranks still skip when no API key is loaded.
+    """
+    game = await riot_service.fetch_live_game()
+    if lite:
+        return {"in_game": game is not None}
+
+    if game is None:
+        return {"in_game": False, "last_game": _read_last_game()}
 
     players = game.get("allPlayers", [])
     active = game.get("activePlayer") or {}
@@ -172,7 +189,13 @@ async def live():
     my_full_runes = (active.get("fullRunes") or None)
     my_live_stats = _live_stats_of(active)
 
-    conn = store.connect()
+    try:
+        conn = store.connect()
+    except Exception:
+        return {
+            "in_game": True,
+            "error": "Live Client is up, but the local database failed to open.",
+        }
     try:
         puuid = store.get_meta(conn, "puuid") or ""
         my_overall = store.champ_overall(conn, puuid, my_champ)
@@ -210,7 +233,10 @@ async def live():
         enemies.sort(key=lambda e: not e["is_lane_opponent"])
         allies.sort(key=lambda a: not a["is_me"])
 
-        player_ranks = await ranks.fetch_ranks([p["riot_id"] for p in enemies + allies])
+        try:
+            player_ranks = await ranks.fetch_ranks([p["riot_id"] for p in enemies + allies])
+        except Exception:
+            player_ranks = {}
         for p in enemies + allies:
             p["rank"] = player_ranks.get(p["riot_id"])
 

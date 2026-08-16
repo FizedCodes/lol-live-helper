@@ -6,15 +6,18 @@ Browser (static/js/main.js, polls /api/live every 10s)
    │
    ▼
 FastAPI (app/main.py — wiring only, ~40 lines)
+   ├── GET /api/health   liveness probe (no Live Client / SQLite / Riot)
    ├── routes_live.py    GET /api/live: live client data + matchup stats + verdicts + ranks + items
    │                     + activePlayer.championStats as live_stats (you only) + runes
+   │                     lite=1 = in-game detector only (no SQLite, no Riot ranks)
    ├── routes_sync.py    POST /api/sync (match history pull), GET /api/stats
    ├── routes_player.py  GET /api/player?riot_id=: ranks, scored smurf signals
    │                     (tier×volume, OTP, grind, ranked WR, KDA/CS), recent matches
+   │                     + ranked LP delta when rank_snapshots sandwich one game
    ├── routes_postgame.py GET /api/postgame/list + /api/postgame?match_id=
    │                     (saved reports / match+timeline cache before Riot)
    └── routes_config.py  GET/POST /api/config (Riot ID), POST/DELETE /api/key (session), GET /api/key/status
-        │                (POST /api/key disabled — env-only key)
+        │                (session paste in RAM; optional RIOT_API_KEY in .env)
         │
         ├── riot_service.py  Central Riot entry (session memory and/or env RIOT_API_KEY)
         ├── routes_riot.py   GET /api/riot/* primitives (account, league, match, timeline, key-status)
@@ -25,11 +28,14 @@ FastAPI (app/main.py — wiring only, ~40 lines)
         ├── postgame.py  build_report() from Match-V5 (+ optional timeline)
         ├── rate_limit.py Sliding-window limiter shared by every RiotWebApi request
         ├── store.py     SQLite (data/helper.db): meta + matchups + matches (queue/time +
-        │                perf: CS/vision/KDA/damage); matchup_stats(), champ_overall(),
-        │                queue_win_rate(), summary() + performance_tracker(), record_match()
+        │                perf: CS/vision/KDA/damage) + rank_snapshots (League-V4 LP over time);
+        │                matchup_stats(), champ_overall(), queue_win_rate(), summary() +
+        │                performance_tracker(), record_match()
         ├── analysis.py  verdict(): thresholds MIN_GAMES_FOR_VERDICT=3, favored ≥55% WR, unfavored ≤45%
         ├── ranks.py     fetch_ranks(): Riot ID → puuid → league entries; module-level cache
-        │                (ranks don't change mid-game); failures return None, never break /api/live
+        │                (ranks don't change mid-game); skipped when no API key; never break /api/live
+        ├── lp.py        attach_match_lp(): compare stored League-V4 snapshots around a ranked
+        │                game (exactly one solo/flex match between two snapshots)
         └── config.py    settings from env; session key in RAM; never returned to browser
 ```
 
@@ -63,7 +69,8 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 - `style.css` — dark LoL-ish theme, CSS vars at top; fight compare, champ hover, order steps.
 - Live: fight-compare card (you vs laner); clickable Riot IDs open player lookup card.
   After a game, open **Postgame** (Sync first).
-- Player: Riot ID search box hitting `/api/player`.
+- Player: Riot ID search box hitting `/api/player`. Ranked match rows show LP
+  when we have a before/after rank snapshot.
 - Stats: win rates + habit **bubbles** (detailed after-match reports are under Postgame).
 
 ## Important mechanics
@@ -72,9 +79,13 @@ FastAPI (app/main.py — wiring only, ~40 lines)
 - **Player recent matches**: `/api/player` indexes newest match IDs from the
   **last 30 days** (up to 70), loads **20** details per page (Load more via
   `next_start`). Finished Match-V5 JSON lives in SQLite `match_cache`. In-memory
-  lookup keeps **ranks** ~5 min; **match-id list re-pulls on every first-page
-  search** so a just-finished game shows up (Load more keeps the frozen list).
-  UI: **Refresh games** (`?refresh=1`) and **Clear cache** (`POST /api/player/cache/clear`).
+  lookup keeps **ranks** ~5 min; **match-id list** re-pulls when older than ~90s
+  (or on Refresh) so re-searches stay fast. Match details fetch up to **6 at once**
+  (shared rate limiter still applies). UI: **Refresh games** (`?refresh=1`) and
+  **Clear cache** (`POST /api/player/cache/clear`). Ranked rows show **LP gained
+  or lost** when we have a League-V4 snapshot from before and after that one game
+  (live lobby + a later lookup/refresh). Riot Match-V5 has no LP field, so a first
+  search of a stranger usually has no number yet.
 - **Last game replay**: every in-game poll snapshots the full `/api/live` payload to meta key
   `last_game` (JSON with `saved_at`). When not in game, that snapshot is returned and rendered
   with a "LAST GAME" banner; win/loss comes from the live client's `GameEnd` event when caught.

@@ -219,6 +219,28 @@ class StoreAccountScopingTests(unittest.TestCase):
             conn.commit()
             conn.close()
 
+    def test_rank_snapshots_skip_identical_state(self):
+        conn = store.connect()
+        try:
+            entries = [{
+                "queueType": "RANKED_SOLO_5x5",
+                "tier": "GOLD",
+                "rank": "II",
+                "leaguePoints": 40,
+                "wins": 10,
+                "losses": 8,
+            }]
+            self.assertEqual(store.save_league_entries(conn, "p1", entries, captured_at=1_000), 1)
+            self.assertEqual(store.save_league_entries(conn, "p1", entries, captured_at=1_100), 0)
+            after = [{**entries[0], "leaguePoints": 58, "wins": 11}]
+            self.assertEqual(store.save_league_entries(conn, "p1", after, captured_at=3_000), 1)
+            snaps = store.list_rank_snapshots(conn, "p1", "RANKED_SOLO_5x5")
+            self.assertEqual(len(snaps), 2)
+            self.assertEqual(snaps[0]["lp"], 40)
+            self.assertEqual(snaps[1]["lp"], 58)
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,18 @@ function formatDetail(detail, fallback) {
 }
 
 export async function api(path, opts = {}) {
-  const resp = await fetch(path, { cache: "no-store", ...opts });
+  let resp;
+  try {
+    resp = await fetch(path, { cache: "no-store", ...opts });
+  } catch (e) {
+    const msg = e && e.message ? String(e.message) : "network error";
+    if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+      throw new Error(
+        "Can't reach the local helper on port 8000. Is the launcher still running?"
+      );
+    }
+    throw e instanceof Error ? e : new Error(msg);
+  }
   let body = null;
   try {
     body = await resp.json();

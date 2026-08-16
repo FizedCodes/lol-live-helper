@@ -16,9 +16,9 @@ router = APIRouter(prefix="/api/riot")
 
 
 @router.get("/key-status")
-async def riot_key_status():
+async def riot_key_status(force: bool = False):
     """Server env key presence + live validation (never returns the key)."""
-    return await riot_service.key_status()
+    return await riot_service.key_status(force=force)
 
 
 @router.get("/account")

@@ -46,6 +46,30 @@ export function timeAgo(epochSeconds) {
   return hrs < 24 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
 }
 
+function lpBadge(m) {
+  const ranked = m.queue_id === 420 || m.queue_id === 440;
+  if (!ranked) return "";
+  const event = m.lp_event;
+  if (event === "remake") {
+    return `<span class="lp-delta flat" title="Remake — no LP">0 LP</span>`;
+  }
+  if (event === "promo" && (m.lp_delta == null || m.lp_delta === 0)) {
+    return `<span class="lp-delta promo" title="Promotion series">Promo</span>`;
+  }
+  if (event === "promoted" && m.lp_delta == null) {
+    return `<span class="lp-delta gain">Promoted</span>`;
+  }
+  if (event === "demoted" && m.lp_delta == null) {
+    return `<span class="lp-delta loss">Demoted</span>`;
+  }
+  if (m.lp_delta == null || m.lp_delta === "") return "";
+  const n = Number(m.lp_delta);
+  if (!Number.isFinite(n)) return "";
+  const cls = n > 0 ? "gain" : n < 0 ? "loss" : "flat";
+  const txt = n > 0 ? `+${n} LP` : `${n} LP`;
+  return `<span class="lp-delta ${cls}">${txt}</span>`;
+}
+
 /** Short local date/time so a skewed relative label is still checkable. */
 export function shortWhen(epochSeconds) {
   if (!epochSeconds) return "";
@@ -401,6 +425,7 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
        <div class="match-main">
          <div class="name">${m.champion}
            <span class="tag ${m.win ? "win-tag" : "loss-tag"}">${m.win ? "WIN" : "LOSS"}</span>
+           ${lpBadge(m)}
          </div>
          <div class="sub">${m.queue}${m.played_at ? ` · ${timeAgo(m.played_at)} · ${shortWhen(m.played_at)}` : ""}</div>
        </div>
@@ -426,9 +451,19 @@ export function renderPlayerCard(p, container, { them = null, me = null } = {}) 
   const cacheNote = p.from_cache
     ? `<span class="muted cache-pill" title="Ranks remembered ~5 min; match list re-checks on each search so new games show up">cached ranks</span>`
     : "";
+  const rankedMissingLp = (p.recent_matches || []).some((m) =>
+    (m.queue_id === 420 || m.queue_id === 440)
+    && m.lp_event !== "remake"
+    && m.lp_delta == null
+    && !m.lp_event
+  );
+  const lpHint = rankedMissingLp
+    ? `<p class="muted lp-hint">Ranked LP shows after we've seen this player's rank before and after that game (live lobby or a later search). Riot doesn't put LP on match history.</p>`
+    : "";
   const matchesBlock = `<div class="recent-matches">
     <div class="hover-section-label">Recent matches · last ${days} days${n ? ` (${n}${total > n ? ` / ${total}` : ""})` : ""} ${cacheNote}</div>
     ${warn}
+    ${lpHint}
     ${matchRows || `<p class="muted">No games in the last ${days} days (or rate limit / empty history).</p>`}
     ${more}
   </div>`;

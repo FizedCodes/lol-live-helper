@@ -37,28 +37,39 @@ def _api_key() -> str:
     return key
 
 
-async def validate_key(key: str, platform: str) -> bool:
+async def validate_key(key: str, platform: str) -> tuple[bool | None, str | None]:
     """Check that a key is alive via the platform status endpoint.
 
-    Only 401/403 mean "bad key". Rate limits and other errors raise so the
-    Setup button does not falsely report a fresh key as rejected.
+    Returns ``(valid, warning)``:
+    - ``(True, None)`` — Riot accepted the key
+    - ``(False, None)`` — 401/403 rejected (expired / invalid)
+    - ``(None, msg)`` — could not confirm (429 / network / other); caller may
+      still accept a user paste so Setup is not blocked by a burned quota
 
-    Does **not** use the shared Sync rate limiter — status is free of Riot's
-    app quota, and blocking key paste behind Sync budget made Setup hang.
+    Does **not** use the shared Sync rate limiter — key paste must not queue
+    behind live rank lookups. Status-V4 still counts toward Riot's app quota.
     """
     url = f"{platform_host(platform)}/lol/status/v4/platform-data"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url, headers={"X-Riot-Token": key})
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers={"X-Riot-Token": key})
+    except (httpx.HTTPError, OSError) as e:
+        return None, f"Could not reach Riot to check the key ({e}). Key can still be used."
+
     if resp.status_code == 200:
-        return True
+        return True, None
     if resp.status_code in (401, 403):
-        return False
+        return False, None
     if resp.status_code == 429:
-        raise RuntimeError(
-            "Riot rate-limited the key check. Wait a minute and try again."
+        retry = resp.headers.get("Retry-After")
+        wait_bit = f" Wait ~{retry}s." if retry else " Wait about a minute."
+        return None, (
+            "Riot rate-limited the key check (quota was likely burned by live "
+            f"rank retries).{wait_bit} Key saved for this session anyway."
         )
-    raise RuntimeError(
-        f"Could not validate the API key (Riot returned {resp.status_code}). Try again in a moment."
+    return None, (
+        f"Could not confirm the key (Riot returned {resp.status_code}). "
+        "Key saved for this session — try Check key status in a moment."
     )
 
 

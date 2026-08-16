@@ -1,6 +1,7 @@
 """One-click / searchable player lookup via Riot Account + League-V4 + recent matches."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -9,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import ranks, riot_service, store
+from app import lp, ranks, riot_service, store
 from app.riot import RiotWebApi
 
 router = APIRouter(prefix="/api")
@@ -22,15 +23,18 @@ class PlayerCacheClearIn(BaseModel):
 MATCH_ID_INDEX = 70
 # Details fetched per page (dev keys burn fast on Match-V5 detail).
 PAGE_SIZE = 20
+# How many Match-V5 detail calls to run at once (rate limiter still spaces acquires).
+MATCH_FETCH_CONCURRENCY = 6
 # Re-search same player within this window keeps ranks (solo/flex/level).
-# Match-id lists are always re-pulled on first-page search so new games show up.
 LOOKUP_TTL_SEC = 300
+# Don't re-hit Riot for the match-id list on every search — only when stale / Refresh.
+IDS_REFRESH_SEC = 90
 # Player history only cares about recent games — older than this are dropped.
 HISTORY_MAX_AGE_SEC = 30 * 86400
 
 # In-memory player lookup memory (this process only).
 # key: canonical riot id lowercased → profile + match_ids + summary map
-# Ranks stay warm for LOOKUP_TTL_SEC; match_ids refresh on every start=0 search.
+# Ranks stay warm for LOOKUP_TTL_SEC; match-id list refreshes when older than IDS_REFRESH_SEC.
 _lookups: dict[str, dict] = {}
 
 QUEUE_LABELS = {
@@ -74,6 +78,7 @@ def _entry_summary(entry: dict | None, queue_label: str) -> dict | None:
     wins = int(entry.get("wins") or 0)
     losses = int(entry.get("losses") or 0)
     games = wins + losses
+    series = entry.get("miniSeries") or {}
     return {
         "queue": queue_label,
         "tier": entry.get("tier"),
@@ -83,6 +88,8 @@ def _entry_summary(entry: dict | None, queue_label: str) -> dict | None:
         "losses": losses,
         "games": games,
         "win_rate": round(100.0 * wins / games, 1) if games else None,
+        "promo": bool(series),
+        "mini_progress": series.get("progress") if series else None,
     }
 
 
@@ -281,6 +288,8 @@ def _match_summary(match: dict, match_id: str, puuid: str) -> dict | None:
     if not me:
         return None
     queue_id = info.get("queueId")
+    duration = int(info.get("gameDuration") or 0)
+    remake = duration < 300 or bool(me.get("gameEndedInEarlySurrender"))
     return {
         "match_id": match_id,
         "champion": me.get("championName"),
@@ -292,8 +301,9 @@ def _match_summary(match: dict, match_id: str, puuid: str) -> dict | None:
         "damage": me.get("totalDamageDealtToChampions") or 0,
         "queue_id": queue_id,
         "queue": QUEUE_LABELS.get(queue_id, f"Queue {queue_id}"),
-        "duration": info.get("gameDuration", 0),
+        "duration": duration,
         "played_at": _played_at(info),
+        "remake": remake,
     }
 
 
@@ -329,29 +339,6 @@ def _cache_lookup_rank(canonical: str, summary_solo: dict | None, flex: dict | N
         })
     else:
         ranks.cache_rank(canonical, {"tier": None})
-
-
-async def _fetch_match_cached(
-    api: RiotWebApi,
-    client: httpx.AsyncClient,
-    match_id: str,
-    conn=None,
-) -> tuple[dict | None, str]:
-    """Prefer SQLite match_cache; only hit Riot on a miss."""
-    own = conn is None
-    if own:
-        conn = store.connect()
-    try:
-        hit = store.get_match_payload(conn, match_id)
-        if hit is not None:
-            return hit, "ok"
-        match, status = await api.fetch_match(client, match_id)
-        if status == "ok" and match is not None:
-            store.put_match_payload(conn, match_id, match)
-        return match, status
-    finally:
-        if own:
-            conn.close()
 
 
 def _lookup_key(canonical: str) -> str:
@@ -541,17 +528,34 @@ async def _player_event_iter(
     """Shared generator body for stream + JSON (yields event dicts)."""
     entry = None if refresh else (_get_lookup(canonical) or _get_lookup(typed_key))
     if entry is None:
-        level = None
-        try:
-            summoner = await riot_service.get_summoner_by_puuid(client, puuid)
-            level = summoner.get("summonerLevel")
-        except Exception:
+        # Level is optional; ranks + match ids are required. Overlap the three Riot calls.
+        async def _level() -> int | None:
+            try:
+                summoner = await riot_service.get_summoner_by_puuid(client, puuid)
+                return summoner.get("summonerLevel")
+            except Exception:
+                return None
+
+        level_task = asyncio.create_task(_level())
+        league_task = asyncio.create_task(riot_service.get_league_entries(client, puuid))
+        ids_task = asyncio.create_task(
+            riot_service.get_match_ids(
+                puuid, MATCH_ID_INDEX, client, start_time=_history_cutoff()
+            )
+        )
+        level, entries_or_err, ids_or_err = await asyncio.gather(
+            level_task, league_task, ids_task, return_exceptions=True
+        )
+        if isinstance(level, BaseException):
             level = None
-        try:
-            entries = await riot_service.get_league_entries(client, puuid)
-        except Exception as e:
-            yield {"type": "error", "detail": f"Could not fetch ranks: {e}"}
+        if isinstance(entries_or_err, BaseException):
+            yield {"type": "error", "detail": f"Could not fetch ranks: {entries_or_err}"}
             return
+        if isinstance(ids_or_err, BaseException):
+            yield {"type": "error", "detail": f"Could not load match list: {ids_or_err}"}
+            return
+        entries = entries_or_err
+        match_ids = ids_or_err
 
         solo = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
         flex = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)
@@ -561,13 +565,6 @@ async def _player_event_iter(
         ranked_games = (summary_solo["games"] if summary_solo else 0) + (
             summary_flex["games"] if summary_flex else 0
         )
-        try:
-            match_ids = await riot_service.get_match_ids(
-                puuid, MATCH_ID_INDEX, client, start_time=_history_cutoff()
-            )
-        except Exception as e:
-            yield {"type": "error", "detail": f"Could not load match list: {e}"}
-            return
         entry = {
             "riot_id": canonical,
             "puuid": puuid,
@@ -578,6 +575,7 @@ async def _player_event_iter(
             "match_ids": match_ids,
             "summaries": {},
             "fetched_through": 0,  # highest id-index we've attempted (+1)
+            "ids_fetched_at": time.time(),
         }
         _put_lookup(entry)
         _lookups[_lookup_key(typed_key)] = entry
@@ -592,11 +590,13 @@ async def _player_event_iter(
         ranked_games = entry["ranked_games"]
         cached_hit = True
         entry.setdefault("fetched_through", 0)
+        entry.setdefault("ids_fetched_at", 0.0)
         ids_refreshed = False
 
-        # Re-search (first page) always re-pulls the match-id list so a just-finished
-        # game shows up. Ranks stay cached. Load more keeps the frozen list for stable paging.
-        if start == 0:
+        # First page: refresh the match-id list when stale (or forced). Keeps
+        # re-searches snappy while still picking up a just-finished game soon.
+        ids_age = time.time() - float(entry.get("ids_fetched_at") or 0)
+        if start == 0 and (refresh or ids_age >= IDS_REFRESH_SEC):
             try:
                 fresh_ids = await riot_service.get_match_ids(
                     puuid, MATCH_ID_INDEX, client, start_time=_history_cutoff()
@@ -605,15 +605,31 @@ async def _player_event_iter(
                 yield {"type": "error", "detail": f"Could not load match list: {e}"}
                 return
             ids_refreshed = True
+            entry["ids_fetched_at"] = time.time()
             if fresh_ids != entry.get("match_ids"):
                 entry["match_ids"] = fresh_ids
                 # Indexes shift when new games appear — reset the Load more cursor.
                 entry["fetched_through"] = 0
-                # Drop summaries for games that fell out of the window (optional tidy).
                 keep = set(fresh_ids)
                 entry["summaries"] = {
                     mid: row for mid, row in entry.get("summaries", {}).items() if mid in keep
                 }
+                # New ranked game → re-pull LP so we can diff against the in-game snapshot.
+                try:
+                    entries = await riot_service.get_league_entries(client, puuid)
+                    solo_e = next((e for e in entries if e.get("queueType") == "RANKED_SOLO_5x5"), None)
+                    flex_e = next((e for e in entries if e.get("queueType") == "RANKED_FLEX_SR"), None)
+                    summary_solo = _entry_summary(solo_e, "Solo")
+                    summary_flex = _entry_summary(flex_e, "Flex")
+                    entry["solo"] = summary_solo
+                    entry["flex"] = summary_flex
+                    ranked_games = (summary_solo["games"] if summary_solo else 0) + (
+                        summary_flex["games"] if summary_flex else 0
+                    )
+                    entry["ranked_games"] = ranked_games
+                    _cache_lookup_rank(canonical, summary_solo, flex_e)
+                except Exception:
+                    pass
             _put_lookup(entry)
 
     id_total = len(entry["match_ids"])
@@ -631,6 +647,7 @@ async def _player_event_iter(
     }
 
     if id_total == 0:
+        lp.attach_match_lp([], puuid, summary_solo, summary_flex)
         yield {
             "type": "done",
             "smurf": _smurf_signal(level, ranked_games, [], summary_solo, summary_flex),
@@ -654,41 +671,91 @@ async def _player_event_iter(
     page_rows: list[dict] = []
     warning = None
     cutoff = _history_cutoff()
+    # Track completion for progress; rebuild page_rows in id-list order at the end.
+    completed = 0
+
+    # Phase 1: memory + SQLite hits (no Riot). One connection for fast cache reads.
+    need_riot: list[str] = []
     conn = store.connect()
     try:
-        for i, match_id in enumerate(page_ids, start=1):
+        for match_id in page_ids:
             if match_id in entry["summaries"]:
+                completed += 1
                 row = entry["summaries"][match_id]
                 if int(row.get("played_at") or 0) >= cutoff:
-                    page_rows.append(row)
                     yield {"type": "match", "match": row, "cached": True}
-                yield {"type": "progress", "done": i, "total": total}
+                yield {"type": "progress", "done": completed, "total": total}
                 continue
-
-            match, status = await _fetch_match_cached(api, client, match_id, conn)
-            if status == "rate_limited":
-                warning = (
-                    "Riot rate-limited mid-lookup — showing partial history. "
-                    "Wait ~2 minutes and search again (cached games stay free)."
-                )
-                yield {"type": "progress", "done": i - 1, "total": total}
-                break
-            if status != "missing" and match is not None:
-                row = _match_summary(match, match_id, puuid)
+            hit = store.get_match_payload(conn, match_id)
+            if hit is not None:
+                row = _match_summary(hit, match_id, puuid)
+                completed += 1
                 if row:
                     entry["summaries"][match_id] = row
                     if int(row.get("played_at") or 0) >= cutoff:
-                        page_rows.append(row)
-                        yield {"type": "match", "match": row, "cached": False}
-            yield {"type": "progress", "done": i, "total": total}
+                        yield {"type": "match", "match": row, "cached": True}
+                yield {"type": "progress", "done": completed, "total": total}
+                continue
+            need_riot.append(match_id)
     finally:
         conn.close()
+
+    # Phase 2: overlapping Match-V5 detail calls for cache misses.
+    if need_riot:
+        sem = asyncio.Semaphore(MATCH_FETCH_CONCURRENCY)
+        write_lock = asyncio.Lock()
+        wconn = store.connect()
+
+        async def _fetch_one(match_id: str):
+            async with sem:
+                return match_id, await api.fetch_match(client, match_id)
+
+        tasks = [asyncio.create_task(_fetch_one(mid)) for mid in need_riot]
+        try:
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    match_id, (match, status) = await fut
+                except asyncio.CancelledError:
+                    continue
+                if status == "rate_limited":
+                    warning = (
+                        "Riot rate-limited mid-lookup — showing partial history. "
+                        "Wait ~2 minutes and search again (cached games stay free)."
+                    )
+                    for t in tasks:
+                        t.cancel()
+                    yield {"type": "progress", "done": completed, "total": total}
+                    break
+                if status != "missing" and match is not None:
+                    row = _match_summary(match, match_id, puuid)
+                    async with write_lock:
+                        store.put_match_payload(wconn, match_id, match)
+                        if row:
+                            entry["summaries"][match_id] = row
+                    if row and int(row.get("played_at") or 0) >= cutoff:
+                        yield {"type": "match", "match": row, "cached": False}
+                completed += 1
+                yield {"type": "progress", "done": completed, "total": total}
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            wconn.close()
+
+    # Rebuild this page in stable id-list order (as_completed finishes out of order).
+    for match_id in page_ids:
+        row = entry["summaries"].get(match_id)
+        if row and int(row.get("played_at") or 0) >= cutoff:
+            page_rows.append(row)
 
     # Advance cursor by id-list index, not by how many summaries succeeded.
     entry["fetched_through"] = max(entry.get("fetched_through", 0), start + len(page_ids))
     _put_lookup(entry)
 
     all_rows = _all_summaries_in_id_order(entry)
+    lp.attach_match_lp(all_rows, puuid, summary_solo, summary_flex)
     # UI list for this response:
     # - first page (start=0): everything loaded so far in id order (stable growth)
     # - load more: only this page (frontend appends)

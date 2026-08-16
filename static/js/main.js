@@ -49,27 +49,31 @@ window.addEventListener("hashchange", showTab);
 
 // --- API key status ------------------------------------------------------
 
-async function refreshKeyPill() {
+function paintKeyPill(s) {
   const pill = $("key-pill");
-  try {
-    const s = await api("/api/key/status");
-    if (!s.configured) {
-      pill.textContent = "No API key";
-      pill.className = "pill bad";
-    } else if (s.valid === false) {
-      pill.textContent = "Key expired";
-      pill.className = "pill bad";
-    } else if (s.valid === true) {
-      pill.textContent = s.source === "session" ? "Session key OK" : "API key OK";
-      pill.className = "pill ok";
-    } else {
-      pill.textContent = "Key: unknown";
-      pill.className = "pill idle";
-    }
-    return s;
-  } catch {
+  if (!s || !s.configured) {
+    pill.textContent = "No API key";
+    pill.className = "pill bad";
+  } else if (s.valid === false) {
+    pill.textContent = "Key expired";
+    pill.className = "pill bad";
+  } else if (s.valid === true) {
+    pill.textContent = s.source === "session" ? "Session key OK" : "API key OK";
+    pill.className = "pill ok";
+  } else {
     pill.textContent = "Key: unknown";
     pill.className = "pill idle";
+  }
+}
+
+async function refreshKeyPill() {
+  try {
+    const s = await api("/api/key/status");
+    paintKeyPill(s);
+    return s;
+  } catch {
+    $("key-pill").textContent = "Key: unknown";
+    $("key-pill").className = "pill idle";
     return null;
   }
 }
@@ -78,6 +82,7 @@ function describeKeyStatus(s) {
   if (!s || !s.configured) {
     return "No key yet — paste one above for this session, or set RIOT_API_KEY in .env.";
   }
+  if (s.warning) return s.warning;
   const where = s.source === "session" ? "session (memory only)" : ".env";
   if (s.valid === false) {
     return `Key rejected by Riot (expired?). Paste a fresh one for this session, or update .env.`;
@@ -88,20 +93,12 @@ function describeKeyStatus(s) {
   return `Key is set (${where}), but Riot could not be reached just now.`;
 }
 
-$("check-key").addEventListener("click", async () => {
-  $("key-status").textContent = "Checking key…";
-  $("check-key").disabled = true;
-  try {
-    const s = await refreshKeyPill();
-    $("key-status").textContent = describeKeyStatus(s);
-  } catch (e) {
-    $("key-status").textContent = e.message;
-  } finally {
-    $("check-key").disabled = false;
-  }
-});
+function setKeyButtonsDisabled(disabled) {
+  $("check-key").disabled = disabled;
+  $("use-session-key").disabled = disabled;
+}
 
-$("use-session-key").addEventListener("click", async () => {
+async function applyPastedKey() {
   const input = $("session-api-key");
   const raw = (input.value || "").trim();
   if (!raw) {
@@ -113,21 +110,49 @@ $("use-session-key").addEventListener("click", async () => {
     return;
   }
   $("key-status").textContent = "Checking key with Riot…";
-  $("use-session-key").disabled = true;
-  try {
-    const result = await post("/api/key", { api_key: raw });
-    input.value = ""; // drop from the page DOM after handoff to server memory
-    // Prefer the save response so we don't immediately re-hit Riot.
+  const result = await post("/api/key", { api_key: raw });
+  input.value = ""; // drop from the page DOM after handoff to server memory
+  if (result.warning) {
+    $("key-status").textContent = result.warning;
+  } else {
     $("key-status").textContent = describeKeyStatus({
       configured: true,
       valid: result.valid === true,
       source: "session",
+      warning: result.warning,
     });
-    await refreshKeyPill();
+  }
+  await refreshKeyPill();
+}
+
+$("check-key").addEventListener("click", async () => {
+  setKeyButtonsDisabled(true);
+  try {
+    const raw = ($("session-api-key").value || "").trim();
+    if (raw) {
+      // Paste box has a key — check *that*, not a leftover server/env key.
+      await applyPastedKey();
+      return;
+    }
+    $("key-status").textContent = "Checking key…";
+    const s = await api("/api/key/status?force=1");
+    paintKeyPill(s);
+    $("key-status").textContent = describeKeyStatus(s);
   } catch (e) {
     $("key-status").textContent = e.message;
   } finally {
-    $("use-session-key").disabled = false;
+    setKeyButtonsDisabled(false);
+  }
+});
+
+$("use-session-key").addEventListener("click", async () => {
+  setKeyButtonsDisabled(true);
+  try {
+    await applyPastedKey();
+  } catch (e) {
+    $("key-status").textContent = e.message;
+  } finally {
+    setKeyButtonsDisabled(false);
   }
 });
 
@@ -151,9 +176,13 @@ $("clear-session-key").addEventListener("click", async () => {
 // --- Riot ID + sync ------------------------------------------------------
 
 async function loadConfig() {
-  const cfg = await api("/api/config");
-  if (cfg.game_name) $("game-name").value = cfg.game_name;
-  if (cfg.tag_line) $("tag-line").value = cfg.tag_line;
+  try {
+    const cfg = await api("/api/config");
+    if (cfg.game_name) $("game-name").value = cfg.game_name;
+    if (cfg.tag_line) $("tag-line").value = cfg.tag_line;
+  } catch {
+    /* server still starting; Setup fields stay empty until the next action */
+  }
 }
 
 $("save-config").addEventListener("click", async () => {
@@ -614,4 +643,8 @@ refreshKeyPill();
 setInterval(refreshKeyPill, 5 * 60 * 1000);
 poll();
 setInterval(poll, 10000);
-ddReady.then(() => poll());
+ddReady.then(() => {
+  poll();
+  // Champion catalog arrives after first paint — refresh Builds picker.
+  if (currentTab() === "builds") renderBuilds(lastLiveData, $("builds-content"));
+});

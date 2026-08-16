@@ -38,6 +38,7 @@ Dependencies are already installed in `.venv`. Data lives in `data/helper.db` (S
 - `RIOT_REGION` (americas/europe/asia/sea) routes Match-V5/Account-V1; `RIOT_PLATFORM` (na1, euw1, ...) routes League-V4 ranks. Both in `.env`.
 - Dev key rate limit: 100 requests / 2 min (and ~20/s). The app self-throttles via
   `rate_limit.py` (defaults 90/2min + 18/1s; override with `RIOT_RATE_LIMIT_*` env vars).
+  Live rank misses cool down so an expired key can’t burn the whole budget before Setup.
 - The user is a League player, newer to programming — explain changes clearly, avoid jargon.
 - The user's own TODO list is in `.cursorrules/TODO.md` — **do not add to it**, it's theirs **only add comments for items that are completed or added to code base**.
 - Keep `Changelogs.MD` updated when features are added.
