@@ -50,12 +50,16 @@ async def sync_matches(
         todo = [m for m in match_ids if m not in known]
 
         if stream:
-            # Keep conn open across the generator — closed when stream finishes.
-            return StreamingResponse(
+            # Transfer ownership to the generator (closes in _sync_stream.finally).
+            # Must clear `conn` before return — otherwise error paths with
+            # stream=1 (UI default) skip cleanup and leak SQLite connections.
+            response = StreamingResponse(
                 _sync_stream(conn, api, puuid, known, todo),
                 media_type="application/x-ndjson",
                 headers={"Cache-Control": "no-store"},
             )
+            conn = None
+            return response
 
         stored = 0
         try:
@@ -73,8 +77,7 @@ async def sync_matches(
             raise HTTPException(status_code=400, detail=str(e))
         return {"fetched": len(todo), "stored": stored, "total_known": len(known) + stored}
     finally:
-        # Streaming path owns/closes the connection inside the generator.
-        if not stream:
+        if conn is not None:
             conn.close()
 
 
